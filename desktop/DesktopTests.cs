@@ -34,7 +34,7 @@ namespace DanmuCinema.Desktop
                 Assert(controller.Window == null && application.Windows.Count == 0, "后台启动不创建窗口", report);
                 controller.Library.ReplaceEntries(new[] { Entry("episode (10).mkv", 10), Entry("episode (2).mkv", 2) });
                 controller.ShowWindow(); Pump();
-                foreach (var key in new[] { "overview", "library", "connect", "setup", "settings", "schedule", "logs" }) { controller.Window.Navigate(key); Pump(); Assert(controller.Window.View.IsVisible, "WPF 页面可加载：" + key, report); }
+                foreach (var key in new[] { "overview", "library", "connect", "setup", "settings", "schedule", "cache", "logs" }) { controller.Window.Navigate(key); Pump(); Assert(controller.Window.View.IsVisible, "WPF 页面可加载：" + key, report); }
                 controller.Session.Page = "library"; controller.Window.Navigate("library"); Pump();
                 Assert(controller.Library.Browse(null, "", LibrarySort.Name, false).Length == 1, "默认按文件夹展示", report);
                 Assert(controller.Library.View("", LibrarySort.Name, false)[0].Name.Contains("(2)"), "名称按集号自然排序", report);
@@ -119,6 +119,11 @@ namespace DanmuCinema.Desktop
             var mouseDown = new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonDownEvent };
             search.Editor.RaiseEvent(mouseDown); Pump();
             Assert(search.IsHistoryOpen && !mouseDown.Handled && System.Windows.Input.Mouse.Captured == null, "首次点击历史输入不截获鼠标或消费编辑点击", report);
+            var popup = (Popup)typeof(HistoryInput).GetField("popup", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).GetValue(search);
+            var historyClear = Descendants<Button>(popup.Child).Single(x => (x.Content as string) == "清空历史");
+            var historyTitle = Descendants<TextBlock>(popup.Child).Single(x => x.Text == "搜索历史");
+            Assert(historyClear.FontSize == historyTitle.FontSize && historyClear.ActualHeight < 35, "清空历史使用与标题相同字号及紧凑按钮", report);
+            Capture((FrameworkElement)popup.Child, Path.Combine(output, "wpf-history.png"));
             var historyArrow = search.Children.OfType<Button>().Single();
             Assert(!historyArrow.Focusable, "历史箭头不抢占编辑焦点", report);
             Assert(((ScrollViewer)search.Editor.Template.FindName("PART_ContentHost", search.Editor)).Background != null, "空白编辑区域参与鼠标命中", report);
@@ -149,6 +154,7 @@ namespace DanmuCinema.Desktop
         static void TestDialogs(DesktopController controller, List<string> report, string output)
         {
             controller.ShowWindow(); controller.Window.View.WindowState = WindowState.Normal; controller.Window.View.Width = 1200; controller.Window.View.Height = 820;
+            TestCachePage(controller, report, output);
             foreach (var page in new[] { "overview", "library", "settings", "schedule" }) { controller.Window.Navigate(page); Settle(); Capture(controller.Window.View, Path.Combine(output, "wpf-" + page + ".png")); }
             controller.Window.View.Width = 1020; controller.Window.View.Height = 700; Pump();
             var cancel = Descendants<Button>(controller.Window.View).Single(x => (x.Content as string) == "取消定时");
@@ -163,8 +169,19 @@ namespace DanmuCinema.Desktop
             var text = Descendants<TextBlock>(match).Select(x => x.Text).ToArray();
             Assert(text.Any(x => x.Contains("测试源")) && text.Any(x => x.Contains("第 2 集")), "匹配弹窗真实绑定显示作品来源和集数", report);
             Assert(Descendants<TabControl>(match).Single().Items.Count == 3, "匹配弹窗提供单集、整季、已选影片三个页签", report);
+            var tabs = Descendants<TabControl>(match).Single();
+            foreach (TabItem tab in tabs.Items)
+            {
+                tabs.SelectedItem = tab; Pump();
+                var panel = (FrameworkElement)tab.Content;
+                Assert(panel.ActualHeight >= panel.DesiredSize.Height && panel.ActualHeight >= 80, "下载页签内容完整显示：" + tab.Header, report);
+            }
+            tabs.SelectedIndex = 0;
+            Capture(match, Path.Combine(output, "wpf-match-150.png"), 144);
             var sources = new SourcesWindow(controller); controller.Window.Track(sources); Settle(); Capture(sources, Path.Combine(output, "wpf-sources.png"));
             Assert(Descendants<CheckBox>(sources).Count() == 5 && !Descendants<TextBox>(sources).Any(x => x.Text.Contains("AppSecret")), "官方接口只显示复选框，保留全部动漫源设置", report);
+            Assert(Descendants<CheckBox>(sources).All(x => x.FocusVisualStyle == null && x.Template.FindName("mark", x) is System.Windows.Shapes.Path), "复选框使用抗锯齿矢量勾选，取消默认虚线焦点框", report);
+            Capture(sources, Path.Combine(output, "wpf-sources-150.png"), 144);
             controller.BatchPlan = new List<BatchEntry> { new BatchEntry { Local = local, Remote = remote, Selected = true, Number = 2, Status = "待下载" } }; controller.BatchTitle = "测试番剧 · 测试源"; controller.BatchStatus = "可匹配 1 集";
             controller.Window.ShowBatch(); Pump();
             Assert(Application.Current.Windows.OfType<BatchWindow>().Count() == 1, "WPF 批量预览可打开", report);
@@ -187,9 +204,35 @@ namespace DanmuCinema.Desktop
         }
         static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
         { if (root is T) yield return (T)root; for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) foreach (var child in Descendants<T>(VisualTreeHelper.GetChild(root, i))) yield return child; }
-        static void Capture(Window window, string path)
+        static void TestCachePage(DesktopController controller, List<string> report, string output)
         {
-            window.UpdateLayout(); var bitmap = new RenderTargetBitmap((int)window.ActualWidth, (int)window.ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(window);
+            var cache = controller.Gateway.Catalog.Cache;
+            cache.Write(DandanApiCache.Key("fixture-match"), "match", "测试番剧 · hash 识别", "fixture", TimeSpan.FromDays(30));
+            cache.Write(DandanApiCache.Key("fixture-comments"), "comment", "测试番剧 · 第 2 集", "fixture", TimeSpan.FromDays(7));
+            cache.Write(DandanApiCache.Key("fixture-expired"), "search", "已过期搜索", "fixture", TimeSpan.FromSeconds(-1));
+            controller.Window.Navigate("cache"); Settle();
+            var view = Descendants<CachePage>(controller.Window.View).Single();
+            var grid = Descendants<DataGrid>(view).Single(); var filter = Descendants<ComboBox>(view).Single();
+            Assert(grid.Items.Count == 3, "缓存页异步加载本地条目", report);
+            Capture(controller.Window.View, Path.Combine(output, "wpf-cache.png"));
+            filter.SelectedIndex = 3; Pump(); Assert(grid.Items.Count == 1, "缓存页按弹幕类型筛选", report);
+            grid.SelectedIndex = 0; Descendants<Button>(view).Single(x => (x.Content as string) == "删除选中").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle();
+            Assert(grid.Items.Count == 0 && cache.Entries().Length == 2, "缓存页实际删除所选条目并刷新", report);
+            filter.SelectedIndex = 0; Descendants<Button>(view).Single(x => (x.Content as string) == "清理过期").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle();
+            Assert(grid.Items.Count == 1 && cache.Entries().All(x => x.ExpiresUtc > DateTime.UtcNow), "缓存页实际清理过期并保留有效识别", report);
+            controller.Window.View.Width = 1020; controller.Window.View.Height = 700; Pump();
+            var clear = Descendants<Button>(view).Single(x => (x.Content as string) == "清空全部缓存"); var position = clear.TranslatePoint(new Point(), controller.Window.View);
+            Assert(position.X >= 0 && position.X + clear.ActualWidth <= controller.Window.View.ActualWidth && grid.ActualHeight > 80, "缓存页最小窗口下按钮与列表完整显示", report);
+            var note = Descendants<TextBlock>(view).Single(x => x.Text.StartsWith("首次成功请求后保存"));
+            Assert(note.TextWrapping == TextWrapping.Wrap && note.ActualHeight > 24 && note.ActualWidth <= view.ActualWidth, "长提示在最小窗口自动换行且完整显示", report);
+            Capture(controller.Window.View, Path.Combine(output, "wpf-cache-small.png"));
+            clear.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle(); Assert(grid.Items.Count == 0 && cache.Entries().Length == 0, "缓存页实际清空全部缓存", report);
+            controller.Window.Navigate("overview"); Pump(); Assert(view.Children.Count == 0 && grid.ItemsSource == null, "切页释放缓存控件和条目引用", report);
+            controller.Window.View.Width = 1200; controller.Window.View.Height = 820;
+        }
+        static void Capture(FrameworkElement window, string path, double dpi = 96)
+        {
+            window.UpdateLayout(); var bitmap = new RenderTargetBitmap((int)(window.ActualWidth * dpi / 96), (int)(window.ActualHeight * dpi / 96), dpi, dpi, PixelFormats.Pbgra32); bitmap.Render(window);
             var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap)); using (var stream = File.Create(path)) encoder.Save(stream);
         }
         static void Assert(bool value, string name, List<string> report) { if (!value) throw new Exception(name); report.Add("PASS " + name); }

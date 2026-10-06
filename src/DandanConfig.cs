@@ -8,6 +8,7 @@ namespace DanmuCinema
         public string AppId { get; set; }
         public string AppSecret { get; set; }
         public string EncryptedAppSecret { get; set; }
+        public string CallbackUrl { get; set; }
         public static string FilePath { get { return Path.Combine(Paths.Root, "config", "dandanplay.json"); } }
         public static void Ensure(AppSettings settings)
         {

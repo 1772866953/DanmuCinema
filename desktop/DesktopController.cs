@@ -38,6 +38,7 @@ namespace DanmuCinema.Desktop
         public readonly AppSettings Settings;
         public readonly ServiceManager Services;
         public readonly DanmuGateway Gateway;
+        public readonly AutomaticDanmu Automatic;
         public readonly MediaLibrary Library = new MediaLibrary();
         public readonly DesktopSession Session = new DesktopSession();
         public readonly Scheduler Scheduler = new Scheduler(new SystemClock());
@@ -67,6 +68,8 @@ namespace DanmuCinema.Desktop
         {
             this.application = application; Settings = settings;
             Services = new ServiceManager(settings); Gateway = new DanmuGateway(settings);
+            Automatic = new AutomaticDanmu(settings, Services.Api, Gateway.Catalog, () => Services.OwnsProcess && !Services.Transitioning && !Closing && !Busy && !BatchRunning);
+            Automatic.Saved += AutoSaved;
             statusTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(30) };
             statusTimer.Tick += StatusTick;
             scheduleTimer = new DispatcherTimer(DispatcherPriority.Normal) { Interval = TimeSpan.FromMilliseconds(250) };
@@ -143,8 +146,11 @@ namespace DanmuCinema.Desktop
             await Services.Start();
             try { Gateway.Start(); } catch (Exception e) { throw new InvalidOperationException("视频服务已启动，但弹幕端口启动失败：" + e.Message); }
             if (!String.IsNullOrEmpty(Services.Api.Token) && !String.IsNullOrEmpty(Settings.UserId)) await Services.Api.SetOriginalPolicy(Settings.PreferOriginal);
+            Automatic.Start();
         }
-        public async Task StopAll() { await Gateway.Stop(); await Services.Stop(); }
+        public async Task StopAll() { await Automatic.Stop(); await Gateway.Stop(); await Services.Stop(); }
+        void AutoSaved(string video)
+        { application.Dispatcher.BeginInvoke(new Action(async () => { if (disposed || Closing) return; Status = "自动弹幕已缓存并保存 · " + Path.GetFileName(video); if (Window != null && !Loading && !Busy && !BatchRunning) await RefreshMetadata(); Publish(); })); }
         public async Task ScanLibrary() { await Services.Api.Request("POST", "Library/Refresh", new { }, true); Log.Write("已提交媒体库扫描。"); lastLibraryRefresh = DateTime.MinValue; }
         async void StatusTick(object sender, EventArgs e) { await UpdateStatus(); }
         public async Task UpdateStatus()
@@ -348,6 +354,7 @@ namespace DanmuCinema.Desktop
             if (showWait != null) showWait.Unregister(null); if (showSignal != null) showSignal.Dispose();
             Scheduler.Cancel(); ReleaseAwake();
             if (tray != null) { tray.Visible = false; tray.DoubleClick -= OpenFromTray; if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose(); tray.Dispose(); }
+            Automatic.Saved -= AutoSaved; Automatic.Dispose();
             if (icon != null) icon.Dispose(); Services.Dispose(); Gateway.Dispose(); Changed = null;
         }
     }

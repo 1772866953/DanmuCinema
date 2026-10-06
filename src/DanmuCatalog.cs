@@ -28,11 +28,12 @@ namespace DanmuCinema
         public string ContentType = "application/json; charset=utf-8";
         public string Content;
     }
-    public sealed class DanmuCatalog : IDisposable
+    public sealed partial class DanmuCatalog : IDisposable
     {
         readonly AppSettings settings;
         readonly JellyfinApi api;
         readonly HttpClient http;
+        public readonly DandanApiCache Cache = new DandanApiCache();
         readonly object sync = new object();
         readonly Dictionary<string, Dictionary<string, object>> animes = new Dictionary<string, Dictionary<string, object>>();
         readonly Dictionary<string, Dictionary<string, object>> episodes = new Dictionary<string, Dictionary<string, object>>();
@@ -90,10 +91,10 @@ namespace DanmuCinema
         List<Provider> Providers()
         {
             var list = new List<Provider>();
+            if (settings.EnableDandan) list.Add(new Provider { Id = "dandan", Name = "弹弹play 官方", Url = "https://api.dandanplay.net" });
             if (settings.EnableExistingDanmu) list.Add(new Provider { Id = "jellyfin", Name = "现有平台", Url = "" });
             if (settings.EnableAnimeko) list.Add(new Provider { Id = "animeko", Name = "Animeko", Url = "https://api.animeko.org" });
             if (settings.EnableBahamut) list.Add(new Provider { Id = "bahamut", Name = "巴哈姆特动画疯", Url = "https://api.gamer.com.tw" });
-            if (settings.EnableDandan) list.Add(new Provider { Id = "dandan", Name = "弹弹play 官方", Url = "https://api.dandanplay.net" });
             string custom = SettingsStore.Unprotect(settings.EncryptedAdditionalApis);
             ValidateAdditionalApis(custom);
             foreach (string line in custom.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
@@ -111,6 +112,25 @@ namespace DanmuCinema
             return p;
         }
         async Task<string> Fetch(Provider provider, string path, object body = null, CancellationToken cancellation = default(CancellationToken))
+        {
+            if (provider.Id != "dandan") return await FetchNetwork(provider, path, body, cancellation).ConfigureAwait(false);
+            var credentials = DandanConfig.Load(); if (!credentials.Ready) throw new InvalidOperationException("官方源未就绪");
+            string kind = path.StartsWith("/api/v2/comment/") ? "comment" : path == "/api/v2/match" ? "match" : "search";
+            string bodyKey = body == null ? "" : Json.Write(body);
+            if (path == "/api/v2/match" && body != null)
+            {
+                var match = Json.Object(bodyKey);
+                // A hash-only lookup is independent of filename and Jellyfin's optional duration.
+                if (Json.Text(match, "matchMode") == "hashOnly") bodyKey = Json.Write(new { fileHash = Json.Text(match, "fileHash"), fileSize = Json.Text(match, "fileSize"), matchMode = "hashOnly" });
+            }
+            string key = DandanApiCache.Key(credentials.AppId.Trim() + "|" + path + "|" + bodyKey);
+            string label = path;
+            if (body != null) label = Json.Text(Json.Object(Json.Write(body)), "fileName") + " · " + Json.Text(Json.Object(Json.Write(body)), "matchMode");
+            else if (path.Contains("keyword=")) label = System.Web.HttpUtility.ParseQueryString(new Uri("https://api.dandanplay.net" + path).Query)["keyword"];
+            return await Cache.Get(key, kind, label, TimeSpan.FromDays(kind == "match" ? 30 : kind == "comment" ? 7 : 1), async () =>
+            { string content = await FetchNetwork(provider, path, body, cancellation).ConfigureAwait(false); EnsureSuccess(Json.Object(content)); return content; }, cancellation).ConfigureAwait(false);
+        }
+        async Task<string> FetchNetwork(Provider provider, string path, object body, CancellationToken cancellation)
         {
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
             {
@@ -130,6 +150,8 @@ namespace DanmuCinema
                     }
                     using (var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token))
                     {
+                        if (provider.Id == "dandan" && path.StartsWith("/api/v2/comment/") && (int)response.StatusCode >= 300 && (int)response.StatusCode < 400)
+                            return await RedirectedComments(request.RequestUri, response.Headers.Location, timeout.Token).ConfigureAwait(false);
                         if (!response.IsSuccessStatusCode) throw new InvalidOperationException("HTTP " + (int)response.StatusCode);
                         using (var stream = await response.Content.ReadAsStreamAsync())
                         using (var output = new MemoryStream())
@@ -145,6 +167,34 @@ namespace DanmuCinema
                     }
                 }
             }
+        }
+        public static bool AllowedCommentRedirect(Uri uri)
+        {
+            if (uri == null || !uri.IsAbsoluteUri || uri.Scheme != "https" || !String.IsNullOrEmpty(uri.UserInfo) || !uri.IsDefaultPort) return false;
+            return new[] { "dandanplay.net", "dandanplay.com", "acplay.net" }.Any(domain => uri.Host == domain || uri.Host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase));
+        }
+        async Task<string> RedirectedComments(Uri origin, Uri location, CancellationToken cancellation)
+        {
+            for (int hop = 0; hop < 3; hop++)
+            {
+                var target = location == null ? null : new Uri(origin, location);
+                if (!AllowedCommentRedirect(target)) throw new InvalidDataException("官方弹幕下载跳转地址无效。");
+                // The acceleration service never receives app authentication headers.
+                using (var request = new HttpRequestMessage(HttpMethod.Get, target))
+                using (var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation).ConfigureAwait(false))
+                {
+                    if ((int)response.StatusCode >= 300 && (int)response.StatusCode < 400) { origin = target; location = response.Headers.Location; continue; }
+                    if (!response.IsSuccessStatusCode) throw new InvalidOperationException("HTTP " + (int)response.StatusCode);
+                    using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                    using (var output = new MemoryStream())
+                    {
+                        var bytes = new byte[32768]; int count;
+                        while ((count = await stream.ReadAsync(bytes, 0, bytes.Length, cancellation).ConfigureAwait(false)) > 0) { if (output.Length + count > 32 * 1024 * 1024) throw new InvalidDataException("响应过大"); output.Write(bytes, 0, count); }
+                        return Encoding.UTF8.GetString(output.ToArray()).TrimStart('\uFEFF');
+                    }
+                }
+            }
+            throw new InvalidDataException("弹幕下载跳转次数过多。");
         }
         static void EnsureSuccess(Dictionary<string, object> response)
         {
@@ -237,7 +287,7 @@ namespace DanmuCinema
             }
             catch { Log.Write("弹幕 XML 已保存，但来源记录未更新；可重新选择来源。"); }
         }
-        public async Task<CatalogSearch> Search(string keyword, bool animeOnly, bool smart = true, int season = 0, string providerId = null)
+        public async Task<CatalogSearch> Search(string keyword, bool animeOnly, bool smart = true, int season = 0, string providerId = null, CancellationToken cancellation = default(CancellationToken))
         {
             if (String.IsNullOrWhiteSpace(keyword)) throw new ArgumentException("请输入作品名。");
             if (keyword.Length > 200) throw new ArgumentException("搜索词过长。");
@@ -253,8 +303,9 @@ namespace DanmuCinema
                 try
                 {
                     var found = new List<Dictionary<string, object>>(); string note = "";
-                    using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+                    using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
                     {
+                        deadline.CancelAfter(TimeSpan.FromSeconds(15));
                         var queries = smart ? SmartMatching.Queries(keyword) : new[] { keyword.Trim() };
                         for (int attempt = 0; attempt < queries.Length; attempt++)
                         {
@@ -272,6 +323,7 @@ namespace DanmuCinema
                 }
                 catch (Exception e)
                 {
+                    cancellation.ThrowIfCancellationRequested();
                     // Do not log endpoint URLs, path tokens, AppSecret, or arbitrary upstream messages.
                     string error = e is OperationCanceledException ? "请求超时" : p.Id == "dandan" && e is InvalidOperationException && e.Message.StartsWith("官方源") ? "未就绪" : e is InvalidOperationException && e.Message.StartsWith("HTTP ") ? e.Message : "来源请求失败";
                     Log.Write("弹幕来源「" + p.Name + "」：" + error);
@@ -282,7 +334,7 @@ namespace DanmuCinema
             var all = parts.SelectMany(x => x.Items).Cast<Dictionary<string, object>>().GroupBy(x => Json.Text(x, "Id")).Select(x => x.First()).ToArray();
             var trustedTitles = all.Where(IsAnime).Select(a => Json.Text(a, "Name")).ToArray();
             var filtered = all.Where(a => !animeOnly || IsAnime(a) || trustedTitles.Any(t => SimilarTitle(t, Json.Text(a, "Name"))))
-                .OrderByDescending(a => SmartMatching.Score(keyword, a, season)).ThenByDescending(a => IsAnime(a)).ThenByDescending(a => Json.Text(a, "Provider") == "bahamut").ThenByDescending(a => Json.Text(a, "Year")).ToArray();
+                .OrderByDescending(a => Json.Text(a, "Provider") == "dandan").ThenByDescending(a => SmartMatching.Score(keyword, a, season)).ThenByDescending(a => IsAnime(a)).ThenByDescending(a => Json.Text(a, "Provider") == "bahamut").ThenByDescending(a => Json.Text(a, "Year")).ToArray();
             lock (sync)
             {
                 foreach (var a in filtered) animes[Json.Text(a, "Id")] = a;
@@ -308,7 +360,7 @@ namespace DanmuCinema
             if (a.Length < 4 || b.Length < 4) return a == b && a.Length > 0;
             return a.Contains(b) || b.Contains(a) || a.Substring(0, 4) == b.Substring(0, 4);
         }
-        public async Task<object[]> Episodes(Dictionary<string, object> anime)
+        public async Task<object[]> Episodes(Dictionary<string, object> anime, CancellationToken cancellation = default(CancellationToken))
         {
             var p = GetProvider(anime); string remote = Uri.EscapeDataString(Json.Text(anime, "RemoteId"));
             var list = new List<object>();
@@ -316,18 +368,18 @@ namespace DanmuCinema
             {
                 string site = Json.Text(anime, "SiteId");
                 if (!Regex.IsMatch(site, "^[a-z0-9_-]+$")) throw new InvalidDataException("来源标识无效");
-                var rows = Json.Read<object[]>(await api.Request("GET", "api/" + site + "/danmu/" + remote + "/episodes", null, true));
+                var rows = Json.Read<object[]>(await api.Request("GET", "api/" + site + "/danmu/" + remote + "/episodes", null, true, cancellation));
                 foreach (Dictionary<string, object> row in rows) list.Add(Episode(anime, MediaNames.CommentId(row), Json.Text(row, "Number"), Json.Text(row, "Title")));
             }
             else if (p.Id == "animeko")
             {
-                var result = Json.Object(await Fetch(p, "/v2/subjects/" + remote));
+                var result = Json.Object(await Fetch(p, "/v2/subjects/" + remote, null, cancellation));
                 foreach (Dictionary<string, object> e in Json.Array(result, "Episodes"))
                     if (Json.Text(e, "Type") == "MAIN") list.Add(Episode(anime, Json.Text(e, "EpisodeId"), First(e, "Sort", "Ep"), First(e, "NameCn", "Name")));
             }
             else if (p.Id == "bahamut")
             {
-                var result = Json.Object(await Fetch(p, "/anime/v1/video.php?videoSn=" + remote)); EnsureSuccess(result);
+                var result = Json.Object(await Fetch(p, "/anime/v1/video.php?videoSn=" + remote, null, cancellation)); EnsureSuccess(result);
                 var detail = Json.Child(Json.Child(result, "Data"), "Anime");
                 var groups = Json.Child(detail, "Episodes");
                 if (groups != null)
@@ -336,7 +388,7 @@ namespace DanmuCinema
             }
             else
             {
-                var result = Json.Object(await Fetch(p, "/api/v2/bangumi/" + remote)); EnsureSuccess(result);
+                var result = Json.Object(await Fetch(p, "/api/v2/bangumi/" + remote, null, cancellation)); EnsureSuccess(result);
                 var bangumi = Json.Child(result, "Bangumi");
                 foreach (Dictionary<string, object> e in Json.Array(bangumi, "Episodes")) list.Add(Episode(anime, Json.Text(e, "EpisodeId"), Json.Text(e, "EpisodeNumber"), Json.Text(e, "EpisodeTitle")));
             }
@@ -376,7 +428,14 @@ namespace DanmuCinema
                 var result = Json.Object(await Fetch(p, "/api/v2/comment/" + remote + "?format=json&withRelated=true", null, cancellation)); EnsureSuccess(result);
                 content = CommentsToXml(Json.Array(result, "Comments"), "dandan");
             }
-            return SortXmlForPlayback(content);
+            double shift; Double.TryParse(Json.Text(episode, "Shift"), NumberStyles.Float, CultureInfo.InvariantCulture, out shift);
+            if (shift != 0 && !Double.IsNaN(shift) && !Double.IsInfinity(shift))
+            {
+                var document = ParseXml(content);
+                foreach (XmlElement row in document.GetElementsByTagName("d")) { var fields = row.GetAttribute("p").Split(','); double time; if (fields.Length > 0 && Double.TryParse(fields[0], NumberStyles.Float, CultureInfo.InvariantCulture, out time)) { fields[0] = Math.Max(0, time + shift).ToString("0.###", CultureInfo.InvariantCulture); row.SetAttribute("p", String.Join(",", fields)); } }
+                content = document.OuterXml;
+            }
+            cancellation.ThrowIfCancellationRequested(); return SortXmlForPlayback(content);
         }
         public static string CommentsToXml(object[] rows, string source)
         {

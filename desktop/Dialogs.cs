@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -120,7 +121,7 @@ namespace DanmuCinema.Desktop
             keyword.Editor.KeyDown += (s, e) => { if (e.Key == System.Windows.Input.Key.Enter) { SearchClicked(); e.Handled = true; } };
             anime.Checked += (s, e) => state.AnimeOnly = true; anime.Unchecked += (s, e) => state.AnimeOnly = false;
             smart.Checked += (s, e) => state.Smart = true; smart.Unchecked += (s, e) => state.Smart = false;
-            input = Ui.Stack(Ui.Row(Ui.Label("接口服务"), service, Command("读取作品集数", GetEpisodes)), Ui.Row(keyword, Command("搜索在线弹幕", Search, true), anime, smart)); Body.Children.Add(input);
+            input = Ui.Stack(Ui.Row(Ui.Label("接口服务"), service, Command("识别本地文件", Identify), Command("读取作品集数", GetEpisodes)), Ui.Row(keyword, Command("搜索在线弹幕", Search, true), anime, smart)); Body.Children.Add(input);
             sources = new ListBox(); episodes = new ListBox();
             var columns = new Grid { Margin = new Thickness(0, 6, 0, 16) }; columns.ColumnDefinitions.Add(new ColumnDefinition()); columns.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) }); columns.ColumnDefinitions.Add(new ColumnDefinition());
             var left = new DockPanel(); var leftLabel = Ui.Text("01  选择作品和来源", "Heading"); DockPanel.SetDock(leftLabel, Dock.Top); left.Children.Add(leftLabel); left.Children.Add(sources);
@@ -141,7 +142,7 @@ namespace DanmuCinema.Desktop
             controller.Changed += Render;
             Closed += (s, e) => { closed = true; controller.Changed -= Render; keyword.Dispose(); sources.ItemsSource = episodes.ItemsSource = null; input.Children.Clear(); scopes.Items.Clear(); commands.Clear(); if (!controller.ReleasingWindow) state.Open = false; };
             Render();
-            if (autoSearch) Loaded += async (s, e) => { if (!String.IsNullOrWhiteSpace(state.Keyword)) await Work(Search); };
+            if (autoSearch) Loaded += async (s, e) => { if (state.Item != null && (String.IsNullOrEmpty(state.ServiceId) || state.ServiceId == "dandan")) await Work(IdentifyThenSearch); else if (!String.IsNullOrWhiteSpace(state.Keyword)) await Work(Search); };
         }
         Button Command(string text, Func<Task> action, bool primary = false) { var button = Ui.Button(text, async () => await Work(action), primary); commands.Add(button); return button; }
         async void SearchClicked() { await Work(Search); }
@@ -180,6 +181,17 @@ namespace DanmuCinema.Desktop
                 var candidate = (Dictionary<string, object>)result.Items[0];
                 if (SmartMatching.Score(state.Keyword, candidate, season) >= 75 && (season == 0 || SmartMatching.SeasonTitle(Json.Text(candidate, "Name")) == season)) { state.SourceIndex = 0; await GetEpisodes(); state.Status = "已推荐作品并读取集数，请核对后下载。\n" + result.Summary; }
             }
+        }
+        async Task IdentifyThenSearch() { await Identify(); if (state.Sources.Length == 0 && !String.IsNullOrWhiteSpace(state.Keyword)) await Search(); }
+        async Task Identify()
+        {
+            if (state.Item == null) throw new InvalidOperationException("请先选择本地影片。");
+            state.Status = "先查本地缓存；需要时识别 hash，再匹配文件名…"; controller.Publish();
+            var result = await controller.Gateway.Catalog.IdentifyFile(state.Item, CancellationToken.None);
+            state.Sources = result.Animes.Cast<object>().ToArray(); state.SourceIndex = result.Recommended == null ? (result.Animes.Length == 1 ? 0 : -1) : Array.FindIndex(result.Animes, x => Json.Text(x, "Id") == Json.Text(result.Recommended, "AnimeId"));
+            state.Episodes = result.Episodes.Where(x => state.SourceIndex >= 0 && Json.Text(x, "AnimeId") == Json.Text(result.Animes[state.SourceIndex], "Id")).Cast<object>().ToArray();
+            state.EpisodeIndex = result.Recommended == null ? -1 : Array.FindIndex(state.Episodes, x => Json.Text((Dictionary<string, object>)x, "Id") == Json.Text(result.Recommended, "Id"));
+            state.Status = result.Status + " 请核对作品和集数后下载。"; controller.Publish();
         }
         Dictionary<string, object> Source()
         { if (state.SourceIndex < 0 || state.SourceIndex >= state.Sources.Length) throw new InvalidOperationException("请先选择作品。"); return (Dictionary<string, object>)state.Sources[state.SourceIndex]; }

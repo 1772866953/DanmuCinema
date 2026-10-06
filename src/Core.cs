@@ -112,6 +112,7 @@ namespace DanmuCinema
 
     public static class SettingsStore
     {
+        static readonly object WriteSync = new object();
         public static AppSettings Load()
         {
             Directory.CreateDirectory(Paths.Data);
@@ -136,10 +137,21 @@ namespace DanmuCinema
         }
         public static void AtomicWrite(string path, string text, bool backup = true)
         {
-            var temporary = path + ".tmp";
-            File.WriteAllText(temporary, text, new UTF8Encoding(false));
-            if (File.Exists(path)) File.Replace(temporary, path, backup ? path + ".bak" : null);
-            else File.Move(temporary, path);
+            lock (WriteSync)
+            {
+                var temporary = path + ".tmp";
+                File.WriteAllText(temporary, text, new UTF8Encoding(false));
+                if (File.Exists(path)) File.Replace(temporary, path, backup ? path + ".bak" : null);
+                else File.Move(temporary, path);
+            }
+        }
+        public static bool WriteMissingSidecar(string path, string content)
+        {
+            lock (WriteSync)
+            {
+                if (File.Exists(path) && new FileInfo(path).Length > 0) return false;
+                AtomicWrite(path, content, false); return true;
+            }
         }
         public static string Protect(string token)
         {

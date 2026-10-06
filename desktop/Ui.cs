@@ -126,7 +126,9 @@ namespace DanmuCinema.Desktop
             // StaysOpen=false captures the mouse and interrupts the editor's first click.
             // Outside clicks are observed on the owner without consuming that click.
             popup = new Popup { PlacementTarget = this, Placement = PlacementMode.Bottom, StaysOpen = true, AllowsTransparency = true, PopupAnimation = PopupAnimation.None, Focusable = false };
-            var body = Ui.Stack(Ui.Row(Ui.Text("搜索历史"), Ui.Button("清空历史", () => { SearchHistory.Clear(scope); suppressed = true; BuildHistory(); })), new ScrollViewer { Content = list, MaxHeight = 300, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
+            var clear = Ui.Button("清空历史", () => { SearchHistory.Clear(scope); suppressed = true; BuildHistory(); }); clear.Style = (Style)Ui.Resource("TextAction");
+            var heading = new Grid { Margin = new Thickness(2, 0, 2, 8) }; heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.Children.Add(Ui.Text("搜索历史")); Grid.SetColumn(clear, 1); heading.Children.Add(clear);
+            var body = Ui.Stack(heading, new ScrollViewer { Content = list, MaxHeight = 300, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
             var surface = new Border { Width = Width, Child = body, Background = (Brush)Ui.Resource("Surface"), BorderBrush = (Brush)Ui.Resource("Line"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(10), Margin = new Thickness(0, 4, 0, 0) };
             TextElement.SetForeground(surface, (Brush)Ui.Resource("Ink")); popup.Child = surface;
             remember = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1000) }; remember.Tick += RememberTick;

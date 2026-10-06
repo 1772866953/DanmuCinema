@@ -42,9 +42,9 @@ namespace DanmuCinema.Desktop
             var iconFile = Path.Combine(Paths.Root, "assets", "DanmuCinema.ico");
             if (File.Exists(iconFile)) View.Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri(iconFile));
             var nav = (StackPanel)View.FindName("Navigation");
-            string[] keys = { "overview", "library", "connect", "setup", "settings", "schedule", "logs" };
-            string[] titles = { "服务总览", "影片与弹幕", "连接 iPad", "首次设置", "启动与偏好", "定时任务", "运行日志" };
-            string[] icons = { "\uE80F", "\uE8B7", "\uE8EA", "\uE713", "\uE115", "\uE823", "\uE9D9" };
+            string[] keys = { "overview", "library", "connect", "setup", "settings", "schedule", "cache", "logs" };
+            string[] titles = { "服务总览", "影片与弹幕", "连接 iPad", "首次设置", "启动与偏好", "定时任务", "缓存管理", "运行日志" };
+            string[] icons = { "\uE80F", "\uE8B7", "\uE8EA", "\uE713", "\uE115", "\uE823", "\uE8B7", "\uE9D9" };
             for (int i = 0; i < keys.Length; i++)
             {
                 string key = keys[i]; var button = Ui.Button(titles[i], () => Navigate(key)); button.Style = (Style)Ui.Resource("Navigation");
@@ -166,10 +166,10 @@ namespace DanmuCinema.Desktop
             if (!navigation.ContainsKey(key)) key = "overview";
             SavePageState(); ClearPage(); session.Page = key;
             foreach (var pair in navigation) { pair.Value.Background = Ui.Brush(pair.Key == key ? "#344668" : "#0014243A"); pair.Value.Foreground = Ui.Brush(pair.Key == key ? "#FFFFFF" : "#AEBED2"); }
-            var titles = new Dictionary<string, string> { { "overview", "服务总览" }, { "library", "影片与弹幕" }, { "connect", "连接 iPad" }, { "setup", "首次设置" }, { "settings", "启动与偏好" }, { "schedule", "定时任务" }, { "logs", "运行日志" } };
+            var titles = new Dictionary<string, string> { { "overview", "服务总览" }, { "library", "影片与弹幕" }, { "connect", "连接 iPad" }, { "setup", "首次设置" }, { "settings", "启动与偏好" }, { "schedule", "定时任务" }, { "cache", "缓存管理" }, { "logs", "运行日志" } };
             ((TextBlock)View.FindName("Heading")).Text = titles[key];
-            ((TextBlock)View.FindName("Subtitle")).Text = key == "library" ? "浏览媒体库，选择影片，为每一集找到合适的弹幕。" : key == "schedule" ? "倒计时或指定时间，托盘中继续运行。" : key == "connect" ? "连接你的电脑，在 iPad 上原画播放。" : key == "settings" ? "让启动、播放和后台运行按你的习惯工作。" : key == "setup" ? "设置账号和媒体库，开启你的家庭影院。" : "在电脑管理媒体，在 iPad 原画播放。";
-            page = key == "library" ? BuildLibrary() : key == "overview" ? BuildOverview() : key == "connect" ? BuildConnect() : key == "setup" ? BuildSetup() : key == "settings" ? BuildSettings() : key == "schedule" ? BuildSchedule() : BuildLogs();
+            ((TextBlock)View.FindName("Subtitle")).Text = key == "library" ? "浏览媒体库，选择影片，为每一集找到合适的弹幕。" : key == "schedule" ? "倒计时或指定时间，托盘中继续运行。" : key == "connect" ? "连接你的电脑，在 iPad 上原画播放。" : key == "cache" ? "先读本地数据，减少官方接口请求。" : key == "settings" ? "让启动、播放和后台运行按你的习惯工作。" : key == "setup" ? "设置账号和媒体库，开启你的家庭影院。" : "在电脑管理媒体，在 iPad 原画播放。";
+            page = key == "library" ? BuildLibrary() : key == "overview" ? BuildOverview() : key == "connect" ? BuildConnect() : key == "setup" ? BuildSetup() : key == "settings" ? BuildSettings() : key == "schedule" ? BuildSchedule() : key == "cache" ? BuildCache() : BuildLogs();
             host.Content = page; Ui.Animate(host); Ui.AnimateAccent((Border)View.FindName("PageAccent")); Render();
             if (key == "schedule") viewTimer.Start(); else viewTimer.Stop();
             double offset;

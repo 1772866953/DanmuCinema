@@ -51,6 +51,7 @@ namespace DanmuCinema
                 Assert(MediaNames.SearchTitle(romanized) == "骸骨骑士大人冒险中" && MediaNames.EpisodeLabel(romanized).Contains("集号未识别"), "候选搜索清理 S 季号且未识别集数明确提示", report);
                 CatalogTests.Run(report).GetAwaiter().GetResult();
                 MatchingTests.Run(report).GetAwaiter().GetResult();
+                RecognitionTests.Run(report).GetAwaiter().GetResult();
                 ScheduleTests.Run(report);
                 LibraryTests.Run(report).GetAwaiter().GetResult();
                 BrowsingTests.Run(report);
