@@ -66,7 +66,7 @@ namespace DanmuCinema
             timer.Tick += async (s, e) => { if (showSignal.WaitOne(0)) RestoreWindow(); await UpdateStatus(); };
             Shown += async (s, e) =>
             {
-                if (startHidden) HideToTray(false);
+                if (startHidden) HideToTray();
                 timer.Start();
                 if (forceStart || settings.StartServicesOnLaunch || services.OwnsProcess) await Execute(StartAll);
                 else await UpdateStatus();
@@ -485,7 +485,7 @@ namespace DanmuCinema
             catch (InvalidOperationException) { }
         }
         void RestoreWindow() { Show(); ShowInTaskbar = true; WindowState = FormWindowState.Normal; Activate(); }
-        void HideToTray(bool notify) { Hide(); ShowInTaskbar = false; if (notify) Notify("已缩小到托盘", "服务会继续运行。双击托盘图标恢复窗口。退出请使用托盘菜单。"); }
+        void HideToTray() { Hide(); ShowInTaskbar = false; }
         void Notify(string titleText, string message) { tray.BalloonTipTitle = titleText; tray.BalloonTipText = message; tray.ShowBalloonTip(4000); }
         async void OnClosing(object sender, FormClosingEventArgs e)
         {
@@ -496,7 +496,7 @@ namespace DanmuCinema
             }
             e.Cancel = true;
             if (closing) return;
-            if (!exitRequested && settings.CloseToTray) { HideToTray(true); return; }
+            if (!exitRequested && settings.CloseToTray) { HideToTray(); return; }
             if (busy) { footer.Text = "当前操作尚未完成，请稍后再退出。"; return; }
             closing = true; timer.Stop(); footer.Text = "正在停止服务并退出…";
             try { await StopAll(); finalClose = true; tray.Visible = false; Close(); }
