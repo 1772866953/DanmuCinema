@@ -13,4 +13,4 @@ Jellyfin 运行包包含 FFmpeg 和其他组件；相应第三方声明保留在
 
 Jellyfin 插件说明：https://github.com/cxfksword/jellyfin-plugin-danmu
 
-Windows 桌面控制台使用系统自带 .NET Framework / WinForms。当前项目源代码位于 src；依赖安装包、运行数据不进入 Git。若对外分发包含第三方二进制的完整目录，需一并履行第三方开源许可证的源码提供等义务。
+Windows 桌面控制台默认使用系统自带 .NET Framework 4.8 / WPF，自定义主题不依赖额外 UI 工具包。桌面源码位于 desktop，复用的业务代码及兼容回退界面位于 src；托盘与系统文件夹选择使用 Windows Forms。依赖安装包、运行数据不进入 Git。若对外分发包含第三方二进制的完整目录，需一并履行第三方开源许可证的源码提供等义务。

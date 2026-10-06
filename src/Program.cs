@@ -13,6 +13,7 @@ namespace DanmuCinema
         {
             if (args.Contains("--self-test")) return SelfTests.Run();
             if (args.Contains("--integration-test")) return IntegrationTests.Run().GetAwaiter().GetResult();
+            if (args.Contains("--wpf-test")) return Desktop.DesktopTests.Run();
             bool owner;
             using (var singleton = new Mutex(true, "Local\\DanmuCinema-" + StableId(Paths.Root), out owner))
             {
@@ -23,6 +24,7 @@ namespace DanmuCinema
                 }
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                if (!args.Contains("--legacy-ui")) return Desktop.DesktopBootstrap.Run(args);
                 Application.ThreadException += (sender, e) => { Log.Write("界面错误：" + e.Exception.Message); MessageBox.Show(e.Exception.Message, "弹幕影院", MessageBoxButtons.OK, MessageBoxIcon.Error); };
                 try
                 {
