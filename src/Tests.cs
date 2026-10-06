@@ -52,6 +52,7 @@ namespace DanmuCinema
                 CatalogTests.Run(report).GetAwaiter().GetResult();
                 MatchingTests.Run(report).GetAwaiter().GetResult();
                 RecognitionTests.Run(report).GetAwaiter().GetResult();
+                CacheAndDeletionTests.Run(report);
                 ScheduleTests.Run(report);
                 LibraryTests.Run(report).GetAwaiter().GetResult();
                 BrowsingTests.Run(report);

@@ -41,6 +41,7 @@ namespace DanmuCinema.Desktop
         LibraryRow[] rows;
         CheckBox all;
         HistoryInput librarySearch;
+        ContextMenu libraryMenu;
         Canvas selectionCanvas;
         Rectangle selectionBox;
         bool dragging, potentialDrag, dragAdditive;
@@ -65,6 +66,16 @@ namespace DanmuCinema.Desktop
                     Ui.Button("管理接口", () => Track(new SourcesWindow(controller))), Command("刷新选中弹幕", controller.RefreshDanmu), Command("导出 XML", ExportXml), Command("影片详情", () => { OpenDetails(); return Done(); }), Ui.Button("下载任务", ShowBatch)), count);
             panel.Children.Add(top);
             grid = new DataGrid { IsReadOnly = false }; System.Windows.Automation.AutomationProperties.SetName(grid, "媒体库文件列表");
+            grid.ContextMenu = new ContextMenu();
+            grid.ContextMenuOpening += (s, e) =>
+            {
+                var visual = Ui.Ancestor<DataGridRow>(e.OriginalSource as DependencyObject);
+                var row = visual == null ? (e.CursorLeft < 0 ? grid.SelectedItem as LibraryRow : null) : visual.Item as LibraryRow;
+                e.Handled = true; if (row == null) return;
+                if (row.Selected != true) { controller.Library.Selection.ReplaceVisible(rows.SelectMany(x => x.Entry.SelectionKeys), row.Entry.SelectionKeys); SyncSelection(); }
+                if (libraryMenu != null) { libraryMenu.IsOpen = false; libraryMenu.Items.Clear(); }
+                libraryMenu = CreateLibraryContextMenu(row.Entry); libraryMenu.PlacementTarget = visual == null ? (UIElement)grid : visual; libraryMenu.IsOpen = true;
+            };
             all = Ui.Check("", false); all.Margin = new Thickness(0); all.ToolTip = "全选 / 取消选择当前列表";
             all.Click += (s, e) => { if (!synchronizing && rows != null) { bool chosen = all.IsChecked == true; foreach (var row in rows) foreach (string key in row.Entry.SelectionKeys) controller.Library.Selection.Set(key, chosen); SyncSelection(); } };
             var checkTemplate = (DataTemplate)XamlReader.Parse("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><CheckBox IsChecked='{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}' Margin='0' HorizontalAlignment='Center' ToolTip='选择影片'/></DataTemplate>");
@@ -94,7 +105,7 @@ namespace DanmuCinema.Desktop
             grid.MouseDoubleClick += (s, e) => { var row = Ui.Ancestor<DataGridRow>(e.OriginalSource as DependencyObject); if (row == null || Ui.Ancestor<Button>(e.OriginalSource as DependencyObject) != null || Ui.Ancestor<CheckBox>(e.OriginalSource as DependencyObject) != null) return; var entry = ((LibraryRow)row.Item).Entry; if (entry.IsFolder) OpenFolder(entry); else DesktopController.Open(controller.LocalUrl + "/web/#!/details?id=" + Uri.EscapeDataString(Json.Text(entry.Item, "Id"))); };
             var overlay = new Grid(); overlay.Children.Add(grid); selectionCanvas = new Canvas { IsHitTestVisible = false }; selectionBox = new Rectangle { Fill = Ui.Brush("#209DABFF"), Stroke = Ui.Brush("#709DABFF"), StrokeThickness = 1, RadiusX = 4, RadiusY = 4, Visibility = Visibility.Collapsed }; selectionCanvas.Children.Add(selectionBox); overlay.Children.Add(selectionCanvas);
             var border = new Border { CornerRadius = new CornerRadius(12), BorderBrush = (Brush)Ui.Resource("Line"), BorderThickness = new Thickness(1), ClipToBounds = true, Child = overlay }; Grid.SetRow(border, 1); panel.Children.Add(border);
-            var hint = Ui.Text("点击文件夹进入列表；支持复选框、全选、Ctrl / Shift 多选与拖动圈选。鼠标侧键和 Alt + 方向键可前进 / 后退。", "Note"); hint.FontSize = 11; Grid.SetRow(hint, 2); panel.Children.Add(hint);
+            var hint = Ui.Text("点击文件夹进入列表；支持复选框、全选、Ctrl / Shift 多选与拖动圈选。右键可删除文件夹、视频或弹幕。鼠标侧键和 Alt + 方向键可前进 / 后退。", "Note"); hint.FontSize = 11; Grid.SetRow(hint, 2); panel.Children.Add(hint);
             grid.Loaded += (s, e) => { double offset; var viewer = Ui.Child<ScrollViewer>(grid); if (viewer != null && session.ScrollOffsets.TryGetValue("library-grid", out offset)) viewer.ScrollToVerticalOffset(offset); };
             ApplyLibrary(); return panel;
         }
@@ -144,6 +155,25 @@ namespace DanmuCinema.Desktop
             Action<string, DanmuMatchScope, bool> add = (title, scope, enabled) => { var item = new MenuItem { Header = title, IsEnabled = enabled }; item.Click += (s, e) => Match(scope == DanmuMatchScope.Selection ? selected.FirstOrDefault() : entry.Item, scope, selected); menu.Items.Add(item); };
             add("重新选择单集弹幕来源…", DanmuMatchScope.Single, true); add("重新选择整季弹幕来源…", DanmuMatchScope.Season, entry.Type != "Movie"); add("重新选择已选 " + selected.Length + " 个影片的来源…", DanmuMatchScope.Selection, selected.Length > 1);
             menu.IsOpen = true;
+        }
+        internal ContextMenu CreateLibraryContextMenu(LibraryEntry entry)
+        {
+            var menu = new ContextMenu { Style = (Style)Ui.Resource("MediaMenu") };
+            var selected = rows == null ? new[] { entry } : rows.Where(x => x.Selected == true).Select(x => x.Entry).ToArray();
+            var targets = entry.SelectionKeys.All(controller.Library.Selection.Contains) && selected.Length > 0 ? selected : new[] { entry };
+            foreach (MediaDeleteKind kind in Enum.GetValues(typeof(MediaDeleteKind)))
+            {
+                var action = kind; string title = kind == MediaDeleteKind.Folder ? "删除整个文件夹…" : kind == MediaDeleteKind.Video ? "删除视频…" : "删除弹幕…";
+                var item = new MenuItem { Header = title, Style = (Style)Ui.Resource("MediaMenuItem"), IsEnabled = !controller.Busy && !controller.Loading && !controller.BatchRunning };
+                item.Click += async (s, e) => await controller.Execute(async () =>
+                {
+                    var plan = await Task.Run(() => MediaDeletion.Plan(targets, action, controller.Settings.MediaFolder));
+                    if (controller.Window == null || !AlertWindow.Show(controller.Window.View, plan.Title, plan.Confirmation, true, "永久删除", "取消")) return;
+                    await controller.DeleteMedia(plan);
+                });
+                menu.Items.Add(item);
+            }
+            return menu;
         }
         void GridDown(object sender, MouseButtonEventArgs e)
         {

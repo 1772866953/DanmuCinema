@@ -9,6 +9,18 @@ using System.Threading.Tasks;
 
 namespace DanmuCinema
 {
+    public static class CacheRetention
+    {
+        public static readonly int[] Months = { 1, 3, 6, 12, 0 };
+        public static readonly string[] Labels = { "1 个月", "3 个月", "半年", "1 年", "长期" };
+        public static bool Valid(int months) { return Months.Contains(months); }
+        public static DateTime Expiry(DateTime createdUtc, int months)
+        {
+            if (!Valid(months)) throw new ArgumentException("缓存有效期无效。");
+            if (months == 0) return DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc);
+            try { return createdUtc.AddMonths(months); } catch (ArgumentOutOfRangeException) { return DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc); }
+        }
+    }
     public sealed class ApiCacheEntry
     {
         public string Key { get; set; }
@@ -21,17 +33,28 @@ namespace DanmuCinema
         public string TypeLabel { get { return Kind == "hash" ? "文件特征" : Kind == "match" ? "文件识别" : Kind == "comment" ? "弹幕" : "搜索 / 作品详情"; } }
         public string SizeLabel { get { return (Bytes / 1000000.0).ToString("N2") + " MB"; } }
         public string CreatedLabel { get { return CreatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"); } }
-        public string ExpiresLabel { get { return ExpiresUtc <= DateTime.UtcNow ? "已过期" : ExpiresUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"); } }
+        public string ExpiresLabel { get { return ExpiresUtc == DateTime.MaxValue ? "长期" : ExpiresUtc <= DateTime.UtcNow ? "已过期" : ExpiresUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"); } }
     }
     // Successful responses only. Credentials and signatures never enter cache keys or data.
     public sealed class DandanApiCache
     {
         readonly string directory;
+        readonly AppSettings settings;
         readonly object sync = new object();
         readonly SemaphoreSlim requestGate = new SemaphoreSlim(1, 1);
         long generation;
         public string DirectoryPath { get { return directory; } }
-        public DandanApiCache() { directory = Path.Combine(Paths.Data, "dandan-cache"); }
+        public int RetentionMonths { get { return settings.CacheRetentionMonths; } }
+        public DandanApiCache(AppSettings settings) { this.settings = settings; directory = Path.Combine(Paths.Data, "dandan-cache"); }
+        public void SetRetention(int months)
+        {
+            if (!CacheRetention.Valid(months)) throw new ArgumentException("缓存有效期无效。");
+            lock (sync)
+            {
+                int previous = settings.CacheRetentionMonths; settings.CacheRetentionMonths = months;
+                try { SettingsStore.Save(settings); } catch { settings.CacheRetentionMonths = previous; throw; }
+            }
+        }
         public static string Key(string value)
         { using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(value))).Replace("-", "").ToLowerInvariant(); }
         string FilePath(string key)
@@ -40,18 +63,19 @@ namespace DanmuCinema
         {
             lock (sync)
             {
-                try { string path = FilePath(key); if (!File.Exists(path)) return null; var entry = Json.Read<ApiCacheEntry>(File.ReadAllText(path)); return entry != null && entry.Key == key && entry.ExpiresUtc > DateTime.UtcNow ? entry.Content : null; }
+                try { string path = FilePath(key); if (!File.Exists(path)) return null; var entry = Json.Read<ApiCacheEntry>(File.ReadAllText(path)); return entry != null && entry.Key == key && CacheRetention.Expiry(entry.CreatedUtc, RetentionMonths) > DateTime.UtcNow ? entry.Content : null; }
                 catch { return null; }
             }
         }
-        public void Write(string key, string kind, string label, string content, TimeSpan lifetime)
+        public void Write(string key, string kind, string label, string content)
         {
             lock (sync)
             {
                 try
                 {
                     Directory.CreateDirectory(directory);
-                    SettingsStore.AtomicWrite(FilePath(key), Json.Write(new ApiCacheEntry { Key = key, Kind = kind, Label = label, Content = content, CreatedUtc = DateTime.UtcNow, ExpiresUtc = DateTime.UtcNow.Add(lifetime) }), false);
+                    DateTime created = DateTime.UtcNow;
+                    SettingsStore.AtomicWrite(FilePath(key), Json.Write(new ApiCacheEntry { Key = key, Kind = kind, Label = label, Content = content, CreatedUtc = created, ExpiresUtc = CacheRetention.Expiry(created, RetentionMonths) }), false);
                     var files = new DirectoryInfo(directory).GetFiles("*.json").OrderBy(x => x.LastWriteTimeUtc).ToArray();
                     long total = files.Sum(x => x.Length); int count = files.Length;
                     foreach (var file in files) { if (count <= 5000 && total <= 256L * 1024 * 1024) break; total -= file.Length; count--; file.Delete(); }
@@ -59,7 +83,7 @@ namespace DanmuCinema
                 catch { Log.Write("官方接口缓存写入失败，本次数据仍可使用。"); }
             }
         }
-        public async Task<string> Get(string key, string kind, string label, TimeSpan lifetime, Func<Task<string>> fetch, CancellationToken cancellation)
+        public async Task<string> Get(string key, string kind, string label, Func<Task<string>> fetch, CancellationToken cancellation)
         {
             cancellation.ThrowIfCancellationRequested();
             string cached = Read(key); if (cached != null) return cached;
@@ -69,7 +93,7 @@ namespace DanmuCinema
                 cached = Read(key); if (cached != null) return cached;
                 long before; lock (sync) before = generation;
                 string content = await fetch().ConfigureAwait(false); cancellation.ThrowIfCancellationRequested();
-                lock (sync) { if (before == generation) Write(key, kind, label, content, lifetime); }
+                lock (sync) { if (before == generation) Write(key, kind, label, content); }
                 return content;
             }
             finally { requestGate.Release(); }
@@ -81,7 +105,7 @@ namespace DanmuCinema
                 if (!Directory.Exists(directory)) return new ApiCacheEntry[0];
                 var result = new List<ApiCacheEntry>();
                 foreach (var file in new DirectoryInfo(directory).GetFiles("*.json"))
-                    try { var entry = Json.Read<ApiCacheEntry>(File.ReadAllText(file.FullName)); if (entry != null && FilePath(entry.Key) == file.FullName) { entry.Bytes = file.Length; entry.Content = null; result.Add(entry); } } catch { }
+                    try { var entry = Json.Read<ApiCacheEntry>(File.ReadAllText(file.FullName)); if (entry != null && FilePath(entry.Key) == file.FullName) { entry.ExpiresUtc = CacheRetention.Expiry(entry.CreatedUtc, RetentionMonths); entry.Bytes = file.Length; entry.Content = null; result.Add(entry); } } catch { }
                 return result.OrderByDescending(x => x.CreatedUtc).ToArray();
             }
         }

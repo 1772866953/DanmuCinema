@@ -183,6 +183,7 @@ namespace DanmuCinema.Desktop
         }
         void ClearPage()
         {
+            if (libraryMenu != null) { libraryMenu.IsOpen = false; libraryMenu.Items.Clear(); libraryMenu.PlacementTarget = null; libraryMenu.DataContext = null; libraryMenu = null; }
             foreach (var resource in pageResources) resource.Dispose(); pageResources.Clear();
             if (page != null) Ui.StopAnimations(page); page = null; host.Content = null; renderedEntries = null;
             server = danmu = plugin = playback = count = location = scheduleStatus = countdown = scheduleTarget = batchStatus = null;

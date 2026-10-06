@@ -38,6 +38,7 @@ namespace DanmuCinema
         public string DandanAppId { get; set; }
         public string EncryptedDandanSecret { get; set; }
         public string EncryptedAdditionalApis { get; set; }
+        public int CacheRetentionMonths { get; set; }
         public AppSettings()
         {
             Port = 8096;
@@ -51,6 +52,7 @@ namespace DanmuCinema
             DanmuPort = 9321;
             EnableAnimeko = EnableBahamut = EnableExistingDanmu = EnableDandan = true;
             AnimeOnly = true;
+            CacheRetentionMonths = 3;
             EncryptedDanmuKey = SettingsStore.Protect(Guid.NewGuid().ToString("N"));
         }
         public void Validate()
@@ -60,6 +62,7 @@ namespace DanmuCinema
             if (String.IsNullOrWhiteSpace(MediaFolder) || !Path.IsPathRooted(MediaFolder)) throw new ArgumentException("请选择完整的视频目录路径。");
             if (String.IsNullOrWhiteSpace(LibraryName)) throw new ArgumentException("媒体库名称不能为空。");
             if (LibraryType != "movies" && LibraryType != "tvshows") throw new ArgumentException("媒体库类型不正确。");
+            if (!CacheRetention.Valid(CacheRetentionMonths)) throw new ArgumentException("缓存有效期必须为 1、3、6、12 个月或长期。");
         }
     }
 

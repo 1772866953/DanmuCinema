@@ -63,6 +63,7 @@ namespace DanmuCinema.Desktop
                 TestHistory(report);
                 TestPresentation(controller, report, output);
                 TestLibraryControls(controller, report);
+                TestDeletionControls(controller, report, output);
                 TestDialogs(controller, report, output);
                 TestBackgroundBatch(controller, report);
                 controller.ReleaseWindow(); Pump(); controller.Dispose();
@@ -207,12 +208,14 @@ namespace DanmuCinema.Desktop
         static void TestCachePage(DesktopController controller, List<string> report, string output)
         {
             var cache = controller.Gateway.Catalog.Cache;
-            cache.Write(DandanApiCache.Key("fixture-match"), "match", "测试番剧 · hash 识别", "fixture", TimeSpan.FromDays(30));
-            cache.Write(DandanApiCache.Key("fixture-comments"), "comment", "测试番剧 · 第 2 集", "fixture", TimeSpan.FromDays(7));
-            cache.Write(DandanApiCache.Key("fixture-expired"), "search", "已过期搜索", "fixture", TimeSpan.FromSeconds(-1));
+            cache.Write(DandanApiCache.Key("fixture-match"), "match", "测试番剧 · hash 识别", "fixture");
+            cache.Write(DandanApiCache.Key("fixture-comments"), "comment", "测试番剧 · 第 2 集", "fixture");
+            RecognitionTests.WriteAgedCache(cache, DandanApiCache.Key("fixture-expired"), "search", "已过期搜索", "fixture");
             controller.Window.Navigate("cache"); Settle();
             var view = Descendants<CachePage>(controller.Window.View).Single();
-            var grid = Descendants<DataGrid>(view).Single(); var filter = Descendants<ComboBox>(view).Single();
+            var grid = Descendants<DataGrid>(view).Single(); var filter = Descendants<ComboBox>(view).Single(x => System.Windows.Automation.AutomationProperties.GetName(x) == "缓存类型");
+            var retention = Descendants<ComboBox>(view).Single(x => System.Windows.Automation.AutomationProperties.GetName(x) == "统一缓存有效期");
+            Assert(retention.Items.Count == 5 && retention.SelectedIndex == 1, "统一缓存有效期提供五个选项并默认三个月", report);
             Assert(grid.Items.Count == 3, "缓存页异步加载本地条目", report);
             Capture(controller.Window.View, Path.Combine(output, "wpf-cache.png"));
             filter.SelectedIndex = 3; Pump(); Assert(grid.Items.Count == 1, "缓存页按弹幕类型筛选", report);
@@ -220,6 +223,9 @@ namespace DanmuCinema.Desktop
             Assert(grid.Items.Count == 0 && cache.Entries().Length == 2, "缓存页实际删除所选条目并刷新", report);
             filter.SelectedIndex = 0; Descendants<Button>(view).Single(x => (x.Content as string) == "清理过期").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle();
             Assert(grid.Items.Count == 1 && cache.Entries().All(x => x.ExpiresUtc > DateTime.UtcNow), "缓存页实际清理过期并保留有效识别", report);
+            retention.SelectedIndex = 4;
+            Descendants<Button>(view).Single(x => (x.Content as string) == "应用有效期").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle();
+            Assert(cache.RetentionMonths == 0 && cache.Entries().Single().ExpiresLabel == "长期" && SettingsStore.Load().CacheRetentionMonths == 0, "应用长期有效期即时更新已有缓存并持久化", report);
             controller.Window.View.Width = 1020; controller.Window.View.Height = 700; Pump();
             var clear = Descendants<Button>(view).Single(x => (x.Content as string) == "清空全部缓存"); var position = clear.TranslatePoint(new Point(), controller.Window.View);
             Assert(position.X >= 0 && position.X + clear.ActualWidth <= controller.Window.View.ActualWidth && grid.ActualHeight > 80, "缓存页最小窗口下按钮与列表完整显示", report);
@@ -229,6 +235,40 @@ namespace DanmuCinema.Desktop
             clear.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle(); Assert(grid.Items.Count == 0 && cache.Entries().Length == 0, "缓存页实际清空全部缓存", report);
             controller.Window.Navigate("overview"); Pump(); Assert(view.Children.Count == 0 && grid.ItemsSource == null, "切页释放缓存控件和条目引用", report);
             controller.Window.View.Width = 1200; controller.Window.View.Height = 820;
+        }
+        static void TestDeletionControls(DesktopController controller, List<string> report, string output)
+        {
+            var original = controller.Library.Entries; string originalRoot = controller.Settings.MediaFolder;
+            string root = Path.Combine(Paths.Root, "ui-deletion"), folder = Path.Combine(root, "测试番剧"); Directory.CreateDirectory(folder);
+            string video = Path.Combine(folder, "episode.mkv"), xml = Path.ChangeExtension(video, ".xml"); File.WriteAllText(video, "fixture"); File.WriteAllText(xml, "fixture XML"); File.WriteAllText(Path.Combine(folder, "poster.jpg"), "fixture poster");
+            var local = new Dictionary<string, object> { { "Id", "deletefixture" }, { "Path", video }, { "Name", "测试影片" }, { "Type", "Episode" } };
+            controller.Settings.MediaFolder = root; controller.Library.Replace(new[] { local }); controller.Window.Navigate("library"); Pump();
+            var entry = controller.Library.Browse(null, "", LibrarySort.Name, false).Single();
+            var menu = controller.Window.CreateLibraryContextMenu(entry);
+            Assert(menu.Items.Cast<MenuItem>().Select(x => (string)x.Header).SequenceEqual(new[] { "删除整个文件夹…", "删除视频…", "删除弹幕…" }), "媒体列表右键菜单提供三种删除范围", report);
+            menu.PlacementTarget = controller.Window.View; menu.IsOpen = true; Settle(); Capture(menu, Path.Combine(output, "wpf-delete-menu.png")); menu.IsOpen = false; menu.PlacementTarget = null;
+            InvokeDeletion(controller, menu, 1, false, output);
+            Assert(File.Exists(video) && File.Exists(xml) && controller.Library.Entries.Length == 1, "取消真实删除确认保留视频、弹幕及列表", report);
+            InvokeDeletion(controller, menu, 2, true, output);
+            Assert(!File.Exists(xml) && File.Exists(video) && !controller.Library.Entries.Single().HasXml, "右键删除弹幕后真实列表立即更新", report);
+            InvokeDeletion(controller, menu, 1, true, output);
+            Assert(!File.Exists(video) && controller.Library.Entries.Length == 0 && Directory.Exists(folder), "右键删除视频后列表移除影片并保留父目录", report);
+            InvokeDeletion(controller, menu, 0, true, output);
+            Assert(!Directory.Exists(folder) && Directory.Exists(root), "右键删除整个文件夹移除其余内容并保留媒体根目录", report);
+            menu.Items.Clear(); controller.Settings.MediaFolder = originalRoot; controller.Library.ReplaceEntries(original); controller.Window.Navigate("library"); Pump();
+        }
+        static void InvokeDeletion(DesktopController controller, ContextMenu menu, int action, bool accept, string output)
+        {
+            bool handled = false; var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(30) };
+            timer.Tick += (s, e) =>
+            {
+                var dialog = Application.Current.Windows.OfType<AlertWindow>().FirstOrDefault(); if (dialog == null) return;
+                timer.Stop(); handled = true; Capture(dialog, Path.Combine(output, "wpf-delete-confirm.png"));
+                Descendants<Button>(dialog).Single(x => (x.Content as string) == (accept ? "永久删除" : "取消")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            };
+            timer.Start(); ((MenuItem)menu.Items[action]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            int attempts = 0; while (!handled && attempts++ < 40) Settle(); timer.Stop(); if (!handled) throw new Exception("删除确认未显示");
+            attempts = 0; while (controller.Busy && attempts++ < 40) Settle(); if (controller.Busy) throw new TimeoutException("删除操作未完成");
         }
         static void Capture(FrameworkElement window, string path, double dpi = 96)
         {

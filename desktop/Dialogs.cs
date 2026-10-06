@@ -34,26 +34,26 @@ namespace DanmuCinema.Desktop
     }
     public sealed class AlertWindow : DialogWindow
     {
-        public AlertWindow(string title, string message, bool confirm) : base(title, 560, 320)
+        public AlertWindow(string title, string message, bool confirm, string acceptLabel = "确定退出", string cancelLabel = "继续运行") : base(title, 560, 320)
         {
             MinWidth = 460; MinHeight = 250; ResizeMode = ResizeMode.NoResize; SizeToContent = SizeToContent.Height; ShowInTaskbar = false;
             var accent = Ui.AccentLine();
             var heading = Ui.Text(title, "Heading"); heading.Margin = new Thickness(0, 12, 0, 8);
             var content = Ui.Text(message); content.LineHeight = 25; content.Margin = new Thickness(0, 0, 0, 22);
             var scroll = new ScrollViewer { Content = content, MaxHeight = 420, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
-            var accept = Ui.Button(confirm ? "确定退出" : "知道了", () => DialogResult = true, true);
+            var accept = Ui.Button(confirm ? acceptLabel : "知道了", () => DialogResult = true, true);
             accept.IsDefault = !confirm;
             var actions = Ui.Row(); actions.HorizontalAlignment = HorizontalAlignment.Right;
-            if (confirm) { var cancel = Ui.Button("继续运行", () => DialogResult = false); cancel.IsCancel = true; actions.Children.Add(cancel); Loaded += (s, e) => cancel.Focus(); }
+            if (confirm) { var cancel = Ui.Button(cancelLabel, () => DialogResult = false); cancel.IsCancel = true; actions.Children.Add(cancel); Loaded += (s, e) => cancel.Focus(); }
             else { accept.IsCancel = true; Loaded += (s, e) => accept.Focus(); }
             actions.Children.Add(accept); Body.Children.Add(Ui.Stack(accent, heading, scroll, actions));
             Loaded += (s, e) => Ui.AnimateAccent(accent);
         }
-        public static bool Show(Window owner, string title, string message, bool confirm)
+        public static bool Show(Window owner, string title, string message, bool confirm, string acceptLabel = "确定退出", string cancelLabel = "继续运行")
         {
             // Keep validation above the active child dialog, and tie its lifetime to it.
             var active = Application.Current.Windows.OfType<Window>().LastOrDefault(x => x.IsActive && x.IsVisible);
-            var dialog = new AlertWindow(title, message, confirm); dialog.Owner = active ?? owner;
+            var dialog = new AlertWindow(title, message, confirm, acceptLabel, cancelLabel); dialog.Owner = active ?? owner;
             return dialog.ShowDialog() == true;
         }
     }

@@ -212,6 +212,31 @@ namespace DanmuCinema.Desktop
             try { Library.ReplaceEntries(await Task.Run(() => MediaLibrary.Build(items))); }
             finally { Loading = false; Publish(); }
         }
+        public async Task DeleteMedia(MediaDeletePlan plan)
+        {
+            bool resume = Automatic.Running;
+            var affected = Library.Entries.Where(x => plan.Affects(Json.Text(x.Item, "Path"))).Select(x => Json.Text(x.Item, "Id")).ToArray();
+            await Automatic.Stop();
+            Exception failure = null;
+            try
+            {
+                await Task.Run(() => MediaDeletion.Execute(plan, CancellationToken.None));
+                Status = plan.Title + "完成，共 " + plan.Targets.Length + " 个目标。"; Log.Write(Status);
+            }
+            catch (Exception e) { failure = e; }
+            try
+            {
+                // Also reflect partial deletion on I/O errors. Prevent the active playback from recreating removed XML.
+                if (plan.Kind == MediaDeleteKind.Danmu) Automatic.SuppressUntilPlaybackEnds(affected);
+                Library.ReplaceEntries(await Task.Run(() => MediaLibrary.Build(Library.Entries.Select(x => x.Item).Where(x => File.Exists(Json.Text(x, "Path"))).ToArray())));
+                Publish();
+            }
+            finally { if (resume && !Closing) Automatic.Start(); }
+            if (failure != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
+            if (plan.Kind != MediaDeleteKind.Danmu && Services.OwnsProcess)
+                try { await Services.Api.Request("POST", "Library/Refresh", new { }, true); }
+                catch { Log.Write("本地文件已删除，Jellyfin 列表稍后可手动扫描刷新。"); }
+        }
         public async Task RefreshDanmu()
         {
             var selected = Library.SelectedItems;

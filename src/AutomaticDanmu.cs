@@ -19,10 +19,14 @@ namespace DanmuCinema
         readonly object sync = new object();
         readonly Dictionary<string, DateTime> attempts = new Dictionary<string, DateTime>();
         readonly Dictionary<string, Task> jobs = new Dictionary<string, Task>();
+        readonly HashSet<string> suppressed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         CancellationTokenSource stopping;
         Timer timer;
         Task polling = Task.FromResult(0);
         public event Action<string> Saved;
+        public bool Running { get { lock (sync) return timer != null; } }
+        public void SuppressUntilPlaybackEnds(IEnumerable<string> ids)
+        { lock (sync) foreach (string id in ids.Where(x => !String.IsNullOrEmpty(x))) suppressed.Add(id); }
         public AutomaticDanmu(AppSettings settings, JellyfinApi api, DanmuCatalog catalog, Func<bool> ready)
         { this.settings = settings; this.api = api; this.catalog = catalog; this.ready = ready; }
         public void Start()
@@ -35,6 +39,8 @@ namespace DanmuCinema
             {
                 if (!ready() || String.IsNullOrEmpty(api.Token) || String.IsNullOrEmpty(settings.UserId)) return;
                 var sessions = Json.Read<object[]>(await api.Request("GET", "Sessions", null, true, cancellation).ConfigureAwait(false));
+                var activeIds = new HashSet<string>(sessions.OfType<Dictionary<string, object>>().Select(x => Json.Text(Json.Child(x, "NowPlayingItem"), "Id")), StringComparer.OrdinalIgnoreCase);
+                lock (sync) suppressed.RemoveWhere(id => !activeIds.Contains(id));
                 foreach (var session in sessions.OfType<Dictionary<string, object>>())
                 {
                     var item = Json.Child(session, "NowPlayingItem"); string id = Json.Text(item, "Id");
@@ -42,7 +48,7 @@ namespace DanmuCinema
                     lock (sync)
                     {
                         DateTime last;
-                        if (jobs.ContainsKey(id) || attempts.TryGetValue(id, out last) && DateTime.UtcNow - last < TimeSpan.FromMinutes(10)) continue;
+                        if (suppressed.Contains(id) || jobs.ContainsKey(id) || attempts.TryGetValue(id, out last) && DateTime.UtcNow - last < TimeSpan.FromMinutes(10)) continue;
                         if (attempts.Count > 2000) attempts.Clear(); attempts[id] = DateTime.UtcNow;
                         string sourceId = Json.Text(session, "MediaSourceId");
                         jobs[id] = Task.Run(async () => { try { await serial.WaitAsync(cancellation).ConfigureAwait(false); try { await Prepare(id, sourceId, cancellation).ConfigureAwait(false); } finally { serial.Release(); } } catch (OperationCanceledException) { } catch { Log.Write("自动弹幕处理暂未完成，可在影片页面手动匹配。"); } });

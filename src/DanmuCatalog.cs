@@ -33,7 +33,7 @@ namespace DanmuCinema
         readonly AppSettings settings;
         readonly JellyfinApi api;
         readonly HttpClient http;
-        public readonly DandanApiCache Cache = new DandanApiCache();
+        public readonly DandanApiCache Cache;
         readonly object sync = new object();
         readonly Dictionary<string, Dictionary<string, object>> animes = new Dictionary<string, Dictionary<string, object>>();
         readonly Dictionary<string, Dictionary<string, object>> episodes = new Dictionary<string, Dictionary<string, object>>();
@@ -42,6 +42,7 @@ namespace DanmuCinema
         public DanmuCatalog(AppSettings settings, JellyfinApi api, HttpMessageHandler handler = null)
         {
             this.settings = settings; this.api = api;
+            Cache = new DandanApiCache(settings);
             // External anime services follow Windows' configured proxy. LAN Jellyfin
             // requests still use the dedicated proxy-free JellyfinApi client.
             http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false });
@@ -127,7 +128,7 @@ namespace DanmuCinema
             string label = path;
             if (body != null) label = Json.Text(Json.Object(Json.Write(body)), "fileName") + " · " + Json.Text(Json.Object(Json.Write(body)), "matchMode");
             else if (path.Contains("keyword=")) label = System.Web.HttpUtility.ParseQueryString(new Uri("https://api.dandanplay.net" + path).Query)["keyword"];
-            return await Cache.Get(key, kind, label, TimeSpan.FromDays(kind == "match" ? 30 : kind == "comment" ? 7 : 1), async () =>
+            return await Cache.Get(key, kind, label, async () =>
             { string content = await FetchNetwork(provider, path, body, cancellation).ConfigureAwait(false); EnsureSuccess(Json.Object(content)); return content; }, cancellation).ConfigureAwait(false);
         }
         async Task<string> FetchNetwork(Provider provider, string path, object body, CancellationToken cancellation)

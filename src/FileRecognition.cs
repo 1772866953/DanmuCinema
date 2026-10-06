@@ -47,7 +47,7 @@ namespace DanmuCinema
                     return new VideoFeature { Hash = BitConverter.ToString(md5.Hash).Replace("-", "").ToLowerInvariant(), Length = length, WriteTicks = ticks, FileName = Path.GetFileNameWithoutExtension(file.Name) };
                 }
             }, cancellation).ConfigureAwait(false);
-            cancellation.ThrowIfCancellationRequested(); Cache.Write(key, "hash", Path.GetFileName(video), Json.Write(result), TimeSpan.FromDays(365)); return result;
+            cancellation.ThrowIfCancellationRequested(); Cache.Write(key, "hash", Path.GetFileName(video), Json.Write(result)); return result;
         }
         public async Task<FileRecognition> IdentifyFile(Dictionary<string, object> item, CancellationToken cancellation)
         {

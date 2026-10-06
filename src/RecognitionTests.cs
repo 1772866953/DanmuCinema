@@ -45,11 +45,12 @@ namespace DanmuCinema
         {
             readonly Dictionary<string, object> item;
             public int Sessions;
+            public bool Playing = true;
             public PlayingFixture(Dictionary<string, object> item) { this.item = item; }
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
             {
                 cancellation.ThrowIfCancellationRequested(); string content;
-                if (request.RequestUri.AbsolutePath == "/Sessions") { Sessions++; content = Json.Write(new[] { new { NowPlayingItem = new { Id = "fixturevideo", Type = "Episode" }, Client = "SenPlayer" } }); }
+                if (request.RequestUri.AbsolutePath == "/Sessions") { Sessions++; content = Json.Write(new[] { new { NowPlayingItem = Playing ? (object)new { Id = "fixturevideo", Type = "Episode" } : null, Client = "SenPlayer" } }); }
                 else content = Json.Write(item);
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(content) });
             }
@@ -93,6 +94,13 @@ namespace DanmuCinema
                 {
                     monitor.Start(); int attempts = 0; while (!File.Exists(xml) && attempts++ < 100) await Task.Delay(30); await monitor.Stop();
                     SelfTests.Assert(File.Exists(xml) && playing.Sessions > 0 && handler.Requests == before, "模拟 SenPlayer 发起 Jellyfin 播放，后台监测自动识别和缓存下载", report);
+                    File.Delete(xml); monitor.SuppressUntilPlaybackEnds(new[] { "fixturevideo" }); int sessionsBefore = playing.Sessions;
+                    monitor.Start(); attempts = 0; while (playing.Sessions == sessionsBefore && attempts++ < 100) await Task.Delay(30); await monitor.Stop();
+                    SelfTests.Assert(!File.Exists(xml) && handler.Requests == before, "当前播放中删除弹幕后不会立刻自动重新下载", report);
+                    playing.Playing = false; sessionsBefore = playing.Sessions; monitor.Start(); attempts = 0;
+                    while (playing.Sessions == sessionsBefore && attempts++ < 100) await Task.Delay(30); await monitor.Stop();
+                    playing.Playing = true; monitor.Start(); attempts = 0; while (!File.Exists(xml) && attempts++ < 100) await Task.Delay(30); await monitor.Stop();
+                    SelfTests.Assert(File.Exists(xml) && handler.Requests == before, "播放结束后解除删除抑制，下次观看仍能从缓存准备弹幕", report);
                 }
                 catalog.Cache.Clear(false); handler.HashHit = false; handler.Redirect = false;
                 result = await catalog.IdentifyFile(local, CancellationToken.None);
@@ -101,9 +109,9 @@ namespace DanmuCinema
                 result = await catalog.IdentifyFile(local, CancellationToken.None);
                 SelfTests.Assert(result.Episodes.Length == 2 && result.Recommended == null && await catalog.AutomaticEpisode(local, CancellationToken.None) == null, "文件名存在多个候选时不会自动选择或下载错误集数", report);
                 var cache = catalog.Cache; cache.Clear(false); int calls = 0; string key = DandanApiCache.Key("concurrent");
-                await Task.WhenAll(Enumerable.Range(0, 5).Select(i => cache.Get(key, "match", "fixture", TimeSpan.FromDays(30), async () => { Interlocked.Increment(ref calls); await Task.Delay(25); return "cached"; }, CancellationToken.None)));
+                await Task.WhenAll(Enumerable.Range(0, 5).Select(i => cache.Get(key, "match", "fixture", async () => { Interlocked.Increment(ref calls); await Task.Delay(25); return "cached"; }, CancellationToken.None)));
                 SelfTests.Assert(calls == 1 && cache.Read(key) == "cached", "并发请求合并为一次官方调用", report);
-                string expired = DandanApiCache.Key("expired"); cache.Write(expired, "comment", "fixture", "expired", TimeSpan.FromSeconds(-1));
+                string expired = DandanApiCache.Key("expired"); WriteAgedCache(cache, expired, "comment", "fixture", "expired");
                 SelfTests.Assert(cache.Read(expired) == null && cache.Entries().Length == 2, "过期缓存可管理但不会用于播放", report);
                 cache.Clear(true); SelfTests.Assert(cache.Read(key) == "cached" && cache.Entries().Length == 1, "清理过期缓存保留有效数据", report);
                 cache.Remove(new[] { key }); SelfTests.Assert(cache.Entries().Length == 0 && File.Exists(xml), "逐条删除缓存不删除视频旁的弹幕 XML", report);
@@ -116,6 +124,11 @@ namespace DanmuCinema
                 SelfTests.Assert(Directory.GetFiles(cache.DirectoryPath, "*.json").Length == 0, "清空缓存也清理损坏条目", report);
                 auto.Dispose();
             }
+        }
+        public static void WriteAgedCache(DandanApiCache cache, string key, string kind, string label, string content)
+        {
+            Directory.CreateDirectory(cache.DirectoryPath);
+            File.WriteAllText(Path.Combine(cache.DirectoryPath, key + ".json"), Json.Write(new ApiCacheEntry { Key = key, Kind = kind, Label = label, Content = content, CreatedUtc = DateTime.UtcNow.AddYears(-2), ExpiresUtc = DateTime.UtcNow.AddSeconds(-1) }));
         }
     }
 }
