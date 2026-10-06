@@ -69,8 +69,9 @@ namespace DanmuCinema
             Text = "全部下载 · " + title; ClientSize = new Size(980, 580); MinimumSize = new Size(800, 500);
             Font = new Font("Microsoft YaHei UI", 10); StartPosition = FormStartPosition.CenterParent;
             var outer = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(16), RowCount = 4, ColumnCount = 1 };
-            outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 65)); outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 48)); outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-            outer.Controls.Add(new Label { Dock = DockStyle.Fill, Text = title + "\r\n请核对下表。按集号关联本地本季文件；无法判断或重复的集数会跳过。" }, 0, 0);
+            outer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            outer.RowStyles.Add(new RowStyle(SizeType.AutoSize)); outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); outer.RowStyles.Add(new RowStyle(SizeType.AutoSize)); outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            outer.Controls.Add(new WrappedLabel { Text = title + "\r\n请核对下表。按集号关联本地本季文件；无法判断或重复的集数会跳过。" }, 0, 0);
             grid = new DataGridView { Dock = DockStyle.Fill, AllowUserToAddRows = false, AllowUserToDeleteRows = false, RowHeadersVisible = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill };
             grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Selected", HeaderText = "下载", FillWeight = 12 });
             grid.Columns.Add("Number", "集号"); grid.Columns[1].FillWeight = 12;
@@ -85,12 +86,12 @@ namespace DanmuCinema
                 if (!entry.Selected) { grid.Rows[row].Cells[0].ReadOnly = true; grid.Rows[row].DefaultCellStyle.ForeColor = Color.Gray; }
             }
             outer.Controls.Add(grid, 0, 1);
-            var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(0, 5, 0, 0) };
+            var actions = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true, Padding = new Padding(0, 5, 0, 0) };
             keep = new CheckBox { Text = "保留已有 XML（取消勾选将直接覆盖）", Checked = keepExisting, AutoSize = true, Margin = new Padding(0, 6, 20, 0) };
             start = new Button { Text = "开始全部下载", AutoSize = true }; stop = new Button { Text = "停止下载", AutoSize = true, Enabled = false };
             start.Click += async (s, e) => await Download(); stop.Click += (s, e) => cancellation.Cancel();
             actions.Controls.Add(keep); actions.Controls.Add(start); actions.Controls.Add(stop); outer.Controls.Add(actions, 0, 2);
-            status = new Label { Dock = DockStyle.Fill, Text = "可匹配 " + plan.Count(x => x.Selected) + " 集，共 " + plan.Count + " 个本地文件。" }; outer.Controls.Add(status, 0, 3); Controls.Add(outer);
+            status = new WrappedLabel { Text = "可匹配 " + plan.Count(x => x.Selected) + " 集，共 " + plan.Count + " 个本地文件。" }; outer.Controls.Add(status, 0, 3); Controls.Add(outer);
             FormClosing += (s, e) => { if (busy) { cancellation.Cancel(); e.Cancel = true; status.Text = "正在停止；已完成的文件保留。"; } };
         }
         async Task Download()

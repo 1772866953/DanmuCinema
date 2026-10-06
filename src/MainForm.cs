@@ -25,7 +25,8 @@ namespace DanmuCinema
         readonly Dictionary<string, Button> navigation = new Dictionary<string, Button>();
         Panel body;
         Label title, subtitle, footer, serverState, danmuState, pluginState, sessionState;
-        TextBox serverAddress, danmuAddress, logs, search, mediaFolder, libraryName, userName, password;
+        TextBox serverAddress, danmuAddress, logs, mediaFolder, libraryName, userName, password;
+        HistorySearchBox search;
         NumericUpDown port, danmuPort;
         ComboBox network, libraryType, closeBehavior;
         CheckBox autoStart, servicesOnLaunch, original;

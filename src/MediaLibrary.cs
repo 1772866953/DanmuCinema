@@ -17,6 +17,10 @@ namespace DanmuCinema
         public DateTime? ModifiedUtc;
         public double Bitrate;
         public bool HasXml;
+        public bool IsFolder;
+        public string FolderPath;
+        public LibraryEntry[] Members;
+        public string[] SelectionKeys { get { return IsFolder ? Members.Select(x => x.Key).ToArray() : new[] { Key }; } }
         public static string Identity(Dictionary<string, object> item)
         {
             string id = Json.Text(item, "Id");
@@ -97,13 +101,38 @@ namespace DanmuCinema
         public LibraryEntry[] View(string filter, LibrarySort sort, bool descending)
         {
             var entries = Entries.Where(x => MediaNames.Matches(x.Item, filter));
-            // Typed sorting keeps 10 GB above 2 GB and missing metadata at the end.
+            return Sort(entries, sort, descending);
+        }
+        public static string DirectoryOf(LibraryEntry entry)
+        {
+            string path = Json.Text(entry.Item, "Path");
+            try { return String.IsNullOrWhiteSpace(path) ? "" : Path.GetDirectoryName(Path.GetFullPath(path)); }
+            catch (ArgumentException) { return ""; }
+        }
+        public LibraryEntry[] Browse(string directory, string filter, LibrarySort sort, bool descending)
+        {
+            var entries = Entries.Where(x => MediaNames.Matches(x.Item, filter));
+            if (directory != null) return Sort(entries.Where(x => String.Equals(DirectoryOf(x), directory, StringComparison.OrdinalIgnoreCase)), sort, descending);
+            var folders = entries.GroupBy(DirectoryOf, StringComparer.OrdinalIgnoreCase).Select(group => {
+                var files = group.ToArray();
+                string name = group.Key == "" ? "未分类影片" : Path.GetFileName(group.Key.TrimEnd(Path.DirectorySeparatorChar));
+                if (String.IsNullOrEmpty(name)) name = group.Key;
+                return new LibraryEntry { IsFolder = true, FolderPath = group.Key, Key = "folder:" + group.Key, Name = name,
+                    Type = "Folder", Members = files, Item = new Dictionary<string, object> { { "Path", group.Key } },
+                    Size = files.All(x => x.Size.HasValue) ? (long?)files.Sum(x => x.Size.Value) : null,
+                    ModifiedUtc = files.Max(x => x.ModifiedUtc), SourceLabel = "" };
+            });
+            return Sort(folders, sort, descending);
+        }
+        static LibraryEntry[] Sort(IEnumerable<LibraryEntry> entries, LibrarySort sort, bool descending)
+        {
+            // Compare numeric filename segments so episode (2) precedes episode (10).
             Func<LibraryEntry, IComparable> value = x => sort == LibrarySort.Modified ? (IComparable)x.ModifiedUtc : sort == LibrarySort.Size ? (IComparable)x.Size : sort == LibrarySort.Bitrate ? (IComparable)x.Bitrate : sort == LibrarySort.Type ? x.Type : x.Name;
-            var comparer = Comparer<IComparable>.Create((a, b) => a is string && b is string ? StringComparer.CurrentCultureIgnoreCase.Compare((string)a, (string)b) : a.CompareTo(b));
+            var comparer = Comparer<IComparable>.Create((a, b) => a is string && b is string ? NaturalNames.Instance.Compare((string)a, (string)b) : a.CompareTo(b));
             var known = entries.Where(x => value(x) != null);
             var ordered = descending ? known.OrderByDescending(value, comparer) : known.OrderBy(value, comparer);
-            return ordered.ThenBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
-                .Concat(entries.Where(x => value(x) == null).OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase)).ToArray();
+            return ordered.ThenBy(x => x.Name, NaturalNames.Instance).ThenBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+                .Concat(entries.Where(x => value(x) == null).OrderBy(x => x.Name, NaturalNames.Instance)).ToArray();
         }
         public Dictionary<string, object>[] SelectedItems { get { return Entries.Where(x => Selection.Contains(x.Key)).Select(x => x.Item).ToArray(); } }
         public static void RequireSameSeason(IEnumerable<Dictionary<string, object>> items)
@@ -112,6 +141,36 @@ namespace DanmuCinema
             if (selected.Length == 0) throw new InvalidOperationException("请先勾选影片。");
             if (selected.Any(x => Json.Text(x, "Type") == "Movie") || selected.Skip(1).Any(x => !SmartMatching.SameSeason(selected[0], x)))
                 throw new InvalidOperationException("批量选择同一弹幕来源时，请只勾选同一番剧、同一季度的文件；电影请单独匹配。");
+        }
+    }
+    public sealed class NaturalNames : IComparer<string>
+    {
+        public static readonly NaturalNames Instance = new NaturalNames();
+        public int Compare(string a, string b)
+        {
+            if (a == b) return 0; if (a == null) return -1; if (b == null) return 1;
+            int i = 0, j = 0;
+            while (i < a.Length && j < b.Length)
+            {
+                if (a[i] >= '0' && a[i] <= '9' && b[j] >= '0' && b[j] <= '9')
+                {
+                    int ai = i, bj = j;
+                    while (i < a.Length && a[i] >= '0' && a[i] <= '9') i++;
+                    while (j < b.Length && b[j] >= '0' && b[j] <= '9') j++;
+                    int ae = ai, be = bj;
+                    while (ae < i && a[ae] == '0') ae++;
+                    while (be < j && b[be] == '0') be++;
+                    int length = (i - ae).CompareTo(j - be); if (length != 0) return length;
+                    for (int n = 0; n < i - ae; n++) { int number = a[ae + n].CompareTo(b[be + n]); if (number != 0) return number; }
+                }
+                else
+                {
+                    int text = Char.ToUpperInvariant(a[i]).CompareTo(Char.ToUpperInvariant(b[j]));
+                    if (text != 0) return text; i++; j++;
+                }
+            }
+            int remainder = (a.Length - i).CompareTo(b.Length - j);
+            return remainder != 0 ? remainder : StringComparer.OrdinalIgnoreCase.Compare(a, b);
         }
     }
     public sealed class DanmuAssociation

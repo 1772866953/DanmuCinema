@@ -13,6 +13,9 @@ namespace DanmuCinema
         readonly MediaLibrary mediaLibrary = new MediaLibrary();
         ComboBox librarySort, libraryOrder;
         Label librarySummary;
+        Label libraryLocation;
+        string libraryDirectory;
+        DateTime libraryFolderOpened;
         bool libraryLoading, libraryNeedsRefresh = true;
         DateTime libraryLastAttempt, libraryLastRefresh;
         string libraryNotice = "启动服务并登录后，自动显示媒体库文件。";
@@ -21,7 +24,7 @@ namespace DanmuCinema
             var page = Page("library"); page.AutoScroll = false;
             var top = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 };
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            search = new TextBox { Width = 245, Margin = new Padding(0, 4, 10, 8) };
+            search = new HistorySearchBox("library", true) { Width = 245, Margin = new Padding(0, 4, 10, 8) };
             search.TextChanged += (s, e) => ApplyLibraryView();
             search.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; ApplyLibraryView(); } };
             Add(top, Actions(new Label { Text = "筛选文件", Width = 78, Height = 32, TextAlign = ContentAlignment.MiddleLeft }, search,
@@ -33,11 +36,12 @@ namespace DanmuCinema
             libraryOrder.Items.AddRange(new object[] { "升序", "降序" }); libraryOrder.SelectedIndex = 0;
             librarySort.SelectedIndexChanged += (s, e) => ApplyLibraryView(); libraryOrder.SelectedIndexChanged += (s, e) => ApplyLibraryView();
             Add(top, Actions(new Label { Text = "排序", Width = 45, Height = 32, TextAlign = ContentAlignment.MiddleLeft }, librarySort, libraryOrder,
-                ActionButton("全选当前列表", () => { library.SelectVisible(true); return Completed(); }, false),
                 ActionButton("取消全部选择", () => { library.ClearChecked(); return Completed(); }, false)));
+            libraryLocation = new WrappedLabel { Text = "媒体库文件夹", ForeColor = muted, Margin = new Padding(3, 6, 3, 3) };
+            Add(top, Actions(ActionButton("返回文件夹", () => { libraryDirectory = null; search.Clear(); ApplyLibraryView(); return Completed(); }, false), libraryLocation));
             Add(top, Actions(ActionButton("选择弹幕来源", MatchDanmu, false), ActionButton("管理接口", EditSources, false),
                 ActionButton("刷新选中弹幕", RefreshDanmu, false), ActionButton("导出 XML", InspectDanmu, false), ActionButton("影片详情", OpenItemDetails, false)));
-            librarySummary = TextLabel(libraryNotice, 30); Add(top, librarySummary);
+            librarySummary = new WrappedLabel { Text = libraryNotice, ForeColor = muted }; Add(top, librarySummary);
             foreach (Control row in top.Controls) row.Margin = new Padding(0, 0, 0, 6);
             library = new MediaGrid(mediaLibrary.Selection) { Dock = DockStyle.Fill, BackgroundColor = Color.White, BorderStyle = BorderStyle.None, EnableHeadersVisualStyles = false, ColumnHeadersHeight = 40, RowTemplate = { Height = 38 } };
             library.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(229, 237, 243);
@@ -45,6 +49,7 @@ namespace DanmuCinema
             library.DefaultCellStyle.SelectionBackColor = Color.FromArgb(220, 240, 236); library.DefaultCellStyle.SelectionForeColor = ink;
             library.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
             library.SelectionUpdated += UpdateLibrarySummary;
+            library.FolderOpened += OpenLibraryFolder;
             library.ColumnHeaderMouseClick += (s, e) =>
             {
                 string[] columns = { "name", "modified", "size", "type", "bitrate" };
@@ -53,26 +58,32 @@ namespace DanmuCinema
                 if (librarySort.SelectedIndex == index) libraryOrder.SelectedIndex = 1 - libraryOrder.SelectedIndex;
                 else { libraryOrder.SelectedIndex = index == 1 ? 1 : 0; librarySort.SelectedIndex = index; }
             };
-            library.CellContentClick += (s, e) => { if (e.RowIndex >= 0 && library.Columns[e.ColumnIndex].Name == "danmu") ShowDanmuOptions(e.RowIndex); };
-            library.CellDoubleClick += async (s, e) => { if (e.RowIndex >= 0 && e.ColumnIndex > 0 && library.Columns[e.ColumnIndex].Name != "danmu") await Execute(OpenItemDetails); };
-            var hint = TextLabel("输入名称或路径即可筛选；点击列标题也可排序。勾选、Ctrl / Shift 或拖动圈选可多选。\r\n点击每行「弹幕」选择单集、整季或已选影片的来源。筛选与排序保留勾选项。", 64); hint.Dock = DockStyle.Bottom;
+            library.DanmuRequested += ShowDanmuOptions;
+            library.CellDoubleClick += async (s, e) => { if (e.RowIndex < 0 || e.RowIndex >= library.Rows.Count || e.ColumnIndex <= 0 || (DateTime.UtcNow - libraryFolderOpened).TotalMilliseconds < 500) return; var entry = (LibraryEntry)library.Rows[e.RowIndex].Tag; if (entry.IsFolder) OpenLibraryFolder(entry); else if (library.Columns[e.ColumnIndex].Name != "danmu") await Execute(OpenItemDetails); };
+            var hint = new WrappedLabel { Text = "点击文件夹查看影片。左上角复选框全选当前列表，勾选文件夹会选择其中影片。\r\n输入名称或路径筛选；支持数字顺序排序、圈选和 Ctrl / Shift 多选。▾ 查看和删除搜索历史。", ForeColor = muted, Dock = DockStyle.Bottom };
             page.Controls.Add(library); page.Controls.Add(hint); page.Controls.Add(top);
         }
         void ApplyLibraryView()
         {
             if (library == null || librarySort == null || libraryOrder == null) return;
-            var entries = mediaLibrary.View(search.Text, (LibrarySort)librarySort.SelectedIndex, libraryOrder.SelectedIndex == 1);
+            var entries = mediaLibrary.Browse(libraryDirectory, search.Text, (LibrarySort)librarySort.SelectedIndex, libraryOrder.SelectedIndex == 1);
             library.SetEntries(entries);
+            libraryLocation.Text = libraryDirectory == null ? "媒体库文件夹" : libraryDirectory == "" ? "未分类影片" : libraryDirectory;
             string[] names = { "name", "modified", "size", "type", "bitrate" };
             foreach (DataGridViewColumn column in library.Columns) column.HeaderCell.SortGlyphDirection = SortOrder.None;
             library.Columns[names[librarySort.SelectedIndex]].HeaderCell.SortGlyphDirection = libraryOrder.SelectedIndex == 1 ? SortOrder.Descending : SortOrder.Ascending;
             UpdateLibrarySummary();
         }
+        void OpenLibraryFolder(LibraryEntry entry)
+        {
+            if (!entry.IsFolder) return;
+            libraryDirectory = entry.FolderPath; libraryFolderOpened = DateTime.UtcNow; ApplyLibraryView();
+        }
         void UpdateLibrarySummary()
         {
             if (librarySummary == null || library == null) return;
-            int shownSelected = library.Rows.Cast<DataGridViewRow>().Count(x => x.Tag is LibraryEntry && mediaLibrary.Selection.Contains(((LibraryEntry)x.Tag).Key));
-            librarySummary.Text = "共 " + mediaLibrary.Entries.Length + " 个 · 当前显示 " + library.Rows.Count + " 个 · 已选 " + mediaLibrary.Selection.Count + " 个（当前列表 " + shownSelected + " 个）" + (libraryNotice == "" ? "" : " · " + libraryNotice);
+            int shownSelected = library.Rows.Cast<DataGridViewRow>().Where(x => x.Tag is LibraryEntry).SelectMany(x => ((LibraryEntry)x.Tag).SelectionKeys).Distinct().Count(mediaLibrary.Selection.Contains);
+            librarySummary.Text = "共 " + mediaLibrary.Entries.Length + " 个影片 · 当前显示 " + library.Rows.Count + (libraryDirectory == null ? " 个文件夹" : " 个影片") + " · 已选 " + mediaLibrary.Selection.Count + " 个影片（当前列表 " + shownSelected + " 个）" + (libraryNotice == "" ? "" : " · " + libraryNotice);
         }
         async Task AutoLoadLibrary()
         {

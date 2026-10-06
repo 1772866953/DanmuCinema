@@ -13,13 +13,17 @@ namespace DanmuCinema
     {
         readonly DanmuCatalog catalog;
         readonly Dictionary<string, object> item;
-        readonly TextBox keyword;
+        readonly HistorySearchBox keyword;
         readonly ListBox sources, episodes;
         readonly Label status;
         readonly Button search, fetch, save, saveAll, saveSelected;
         readonly CheckBox animeOnly, smart;
         readonly ComboBox service;
         readonly TabControl scopeTabs;
+        readonly TableLayoutPanel layout;
+        readonly List<WrappedLabel> scopeDescriptions = new List<WrappedLabel>();
+        readonly List<Button> scopeCommands = new List<Button>();
+        bool fittingLayout;
         readonly Dictionary<string, object>[] selectedLocal;
         bool busy;
         class Choice
@@ -42,7 +46,8 @@ namespace DanmuCinema
             MinimumSize = new Size(960, 600); StartPosition = FormStartPosition.CenterParent; AutoScaleMode = AutoScaleMode.Dpi;
             BackColor = Color.FromArgb(241, 244, 248); Padding = new Padding(20);
             var outer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4 };
-            outer.RowStyles.Add(new RowStyle(SizeType.AutoSize)); outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 120)); outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 100));
+            layout = outer; outer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            outer.RowStyles.Add(new RowStyle(SizeType.AutoSize)); outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 160)); outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             var input = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 };
             input.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             service = new ComboBox { Width = 300, DropDownStyle = ComboBoxStyle.DropDownList };
@@ -52,7 +57,8 @@ namespace DanmuCinema
             fetch = new Button { Text = "读取选中作品的集数", AutoSize = true, Height = 34 };
             fetch.Click += async (s, e) => await Execute(GetEpisodes);
             input.Controls.Add(Flow(new Label { Text = "接口服务", Width = 85, Height = 32, TextAlign = ContentAlignment.MiddleLeft }, service, fetch), 0, 0);
-            keyword = new TextBox { Width = 350, Text = item == null ? initialSearch : MediaNames.SearchTitle(item), Margin = new Padding(0, 5, 12, 5) };
+            keyword = new HistorySearchBox("danmu") { Width = 350, Text = item == null ? initialSearch : MediaNames.SearchTitle(item), Margin = new Padding(0, 5, 12, 5) };
+            keyword.SearchChosen += async () => await Execute(Search);
             search = new Button { Text = "搜索在线弹幕", AutoSize = true, Height = 34 };
             search.Click += async (s, e) => await Execute(Search);
             keyword.KeyDown += async (s, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await Execute(Search); } };
@@ -80,9 +86,12 @@ namespace DanmuCinema
             if (selectedLocal.Length > 1) AddScope("已选 " + selectedLocal.Length + " 个影片", saveSelected, "只更新勾选的同番同季影片，不扩展到整个季度；下载前可再次核对。", DanmuMatchScope.Selection);
             foreach (TabPage page in scopeTabs.TabPages) if ((DanmuMatchScope)page.Tag == scope) scopeTabs.SelectedTab = page;
             outer.Controls.Add(scopeTabs, 0, 2);
-            status = new Label { Dock = DockStyle.Fill, ForeColor = Color.FromArgb(100, 116, 131), Text = item == null ? "可直接搜索在线弹幕。关联前请回到本地列表选择视频。" : "本地：" + Json.Text(item, "SeriesName") + " · " + Json.Text(item, "Name") + "\r\n请核对季度、年份和集数。搜索词已去掉末尾 S 季号，结果可能包含其他季度。", Padding = new Padding(0, 10, 0, 0) };
+            status = new WrappedLabel { Name = "matchStatus", ForeColor = Color.FromArgb(100, 116, 131), Text = item == null ? "可直接搜索在线弹幕。关联前请回到本地列表选择视频。" : "本地：" + Json.Text(item, "SeriesName") + " · " + Json.Text(item, "Name") + "\r\n请核对季度、年份和集数。搜索词已去掉末尾 S 季号，结果可能包含其他季度。", Padding = new Padding(0, 10, 0, 0) };
             save.Enabled = item != null;
             outer.Controls.Add(status, 0, 3); Controls.Add(outer);
+            outer.SizeChanged += (s, e) => FitScopeHeight();
+            scopeTabs.SizeChanged += (s, e) => FitScopeHeight();
+            FitScopeHeight();
             service.SelectedIndexChanged += async (s, e) => { if (!busy && Visible && !String.IsNullOrWhiteSpace(keyword.Text)) await Execute(Search); };
             Shown += async (s, e) => { if (!String.IsNullOrWhiteSpace(keyword.Text)) await Execute(Search); };
             FormClosing += (s, e) => { if (busy) { e.Cancel = true; status.Text = "正在执行请求，请稍后关闭。"; } };
@@ -94,23 +103,41 @@ namespace DanmuCinema
         }
         void AddScope(string caption, Button command, string explanation, DanmuMatchScope scope)
         {
-            var page = new TabPage(caption) { Tag = scope, Padding = new Padding(10), BackColor = Color.White };
-            var content = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
-            content.RowStyles.Add(new RowStyle(SizeType.AutoSize)); content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            var page = new TabPage(caption) { Tag = scope, Padding = new Padding(10), BackColor = Color.White, AutoScroll = true };
+            var content = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 2 };
+            content.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            content.RowStyles.Add(new RowStyle(SizeType.AutoSize)); content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            command.MinimumSize = new Size(0, 36);
             content.Controls.Add(Flow(command), 0, 0);
-            content.Controls.Add(new Label { Text = explanation, Dock = DockStyle.Fill, ForeColor = Color.FromArgb(100, 116, 131) }, 0, 1);
+            var label = new WrappedLabel { Name = "scopeDescription", Text = explanation, ForeColor = Color.FromArgb(100, 116, 131) };
+            content.Controls.Add(label, 0, 1); scopeDescriptions.Add(label); scopeCommands.Add(command);
+            label.FontChanged += (s, e) => FitScopeHeight(); command.SizeChanged += (s, e) => FitScopeHeight();
             page.Controls.Add(content); scopeTabs.TabPages.Add(page);
+        }
+        void FitScopeHeight()
+        {
+            if (fittingLayout || layout == null || scopeTabs == null || scopeDescriptions.Count == 0) return;
+            fittingLayout = true;
+            try
+            {
+                int width = Math.Max(100, scopeTabs.Width - 48), height = 0;
+                for (int i = 0; i < scopeDescriptions.Count; i++)
+                    height = Math.Max(height, Math.Max(scopeCommands[i].Height, scopeCommands[i].GetPreferredSize(Size.Empty).Height) + scopeDescriptions[i].GetPreferredSize(new Size(width, 0)).Height);
+                layout.RowStyles[2].Height = height + Font.Height + 54;
+            }
+            finally { fittingLayout = false; }
         }
         async Task Execute(Func<Task> action)
         {
-            if (busy) return; busy = true; search.Enabled = fetch.Enabled = save.Enabled = saveAll.Enabled = saveSelected.Enabled = service.Enabled = scopeTabs.Enabled = sources.Enabled = episodes.Enabled = animeOnly.Enabled = smart.Enabled = false; UseWaitCursor = true;
+            if (busy) return; busy = true; keyword.Enabled = search.Enabled = fetch.Enabled = save.Enabled = saveAll.Enabled = saveSelected.Enabled = service.Enabled = scopeTabs.Enabled = sources.Enabled = episodes.Enabled = animeOnly.Enabled = smart.Enabled = false; UseWaitCursor = true;
             try { await action(); }
             catch (Exception e) { status.Text = e.Message; }
-            finally { busy = false; search.Enabled = fetch.Enabled = service.Enabled = scopeTabs.Enabled = sources.Enabled = episodes.Enabled = animeOnly.Enabled = smart.Enabled = true; save.Enabled = item != null; saveAll.Enabled = item != null && Json.Text(item, "Type") != "Movie"; saveSelected.Enabled = selectedLocal.Length > 1; UseWaitCursor = false; }
+            finally { busy = false; keyword.Enabled = search.Enabled = fetch.Enabled = service.Enabled = scopeTabs.Enabled = sources.Enabled = episodes.Enabled = animeOnly.Enabled = smart.Enabled = true; save.Enabled = item != null; saveAll.Enabled = item != null && Json.Text(item, "Type") != "Movie"; saveSelected.Enabled = selectedLocal.Length > 1; UseWaitCursor = false; }
         }
         async Task Search()
         {
             if (String.IsNullOrWhiteSpace(keyword.Text)) throw new InvalidOperationException("请输入作品名。");
+            keyword.Commit(true);
             status.Text = "正在查询在线弹幕来源…";
             int season = item == null ? SmartMatching.SeasonTitle(keyword.Text) : SmartMatching.Season(item);
             sources.Items.Clear(); episodes.Items.Clear();
