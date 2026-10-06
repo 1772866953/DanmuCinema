@@ -28,7 +28,7 @@ namespace DanmuCinema
                         data = "{\"success\":true,\"animes\":[{\"animeId\":1,\"animeTitle\":\"骸骨骑士 第二季\",\"typeDescription\":\"动漫\",\"startDate\":\"2026-07-06\",\"episodeCount\":12},{\"animeId\":2,\"animeTitle\":\"无关电影\",\"typeDescription\":\"电影\"}]}";
                     else if (request.RequestUri.AbsolutePath.Contains("/bangumi/"))
                         data = "{\"success\":true,\"bangumi\":{\"episodes\":[{\"episodeId\":11,\"episodeNumber\":\"3\",\"episodeTitle\":\"第三集\"}]}}";
-                    else data = "{\"comments\":[{\"cid\":1,\"p\":\"1.25,5,16777215,user\",\"m\":\"中文<&弹幕\"}]}";
+                    else data = "{\"comments\":[{\"cid\":2,\"p\":\"10,1,16777215,user\",\"m\":\"后出现\"},{\"cid\":1,\"p\":\"1.25,5,16777215,user\",\"m\":\"中文<&弹幕\"}]}";
                     return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(data, Encoding.UTF8, "application/json") };
                 }
                 finally { Interlocked.Decrement(ref Active); }
@@ -59,7 +59,7 @@ namespace DanmuCinema
                 SelfTests.Assert(detail.Content.Contains("第三集"), "重启后番剧 ID 可通过持久缓存恢复", report);
                 var reply = await catalog.Route("/api/v2/comment/" + Json.Text((Dictionary<string, object>)eps[0], "Id") + "?format=json");
                 var restoredComments = Json.Array(Json.Object(reply.Content), "Comments");
-                SelfTests.Assert(restoredComments.Length == 1 && Json.Text((Dictionary<string, object>)restoredComments[0], "M") == "中文<&弹幕", "重启后弹幕 ID 恢复并输出播放器 JSON", report);
+                SelfTests.Assert(restoredComments.Length == 2 && Json.Text((Dictionary<string, object>)restoredComments[0], "M") == "中文<&弹幕" && Json.Text((Dictionary<string, object>)restoredComments[1], "P").StartsWith("10,"), "重启后弹幕 ID 恢复并按时间输出播放器 JSON", report);
                 using (var gateway = new DanmuGateway(settings, catalog))
                 {
                     gateway.Start();
@@ -70,7 +70,7 @@ namespace DanmuCinema
                         var data = Json.Object(search);
                         SelfTests.Assert(Json.Array(data, "Animes").Length == 2 && Json.Array(data, "SourceStatus").Length == 3, "iPad 网关实际返回多来源搜索与故障状态", report);
                         string content = await client.GetStringAsync(root + "/api/v2/comment/" + Json.Text((Dictionary<string, object>)eps[0], "Id") + "?format=xml");
-                        SelfTests.Assert(DanmuCatalog.ParseXml(content).GetElementsByTagName("d").Count == 1, "iPad 网关实际输出新增来源 XML", report);
+                        SelfTests.Assert(DanmuCatalog.ParseXml(content).GetElementsByTagName("d").Count == 2 && DanmuCatalog.ParseXml(content).GetElementsByTagName("d")[0].InnerText == "中文<&弹幕", "iPad 网关实际输出按时间排序的新增来源 XML", report);
                     }
                     await gateway.Stop();
                 }
@@ -80,6 +80,13 @@ namespace DanmuCinema
             SelfTests.Assert(DanmuCatalog.CommentsToXml(animekoRows, "animeko").Contains("1.25,4,25,16777215") && DanmuCatalog.CommentsToXml(bahamutRows, "bahamut").Contains("2.5,5,25,16711680"), "两个动漫源的时间单位、位置和颜色转换", report);
             rejected = false; try { DanmuCatalog.ParseXml("<!DOCTYPE i [<!ENTITY x SYSTEM 'file:///C:/secret'>]><i>&x;</i>"); } catch (System.Xml.XmlException) { rejected = true; }
             SelfTests.Assert(rejected, "弹幕 XML 拒绝外部实体", report);
+            string unordered = "<i><chatserver>fixture</chatserver><d p=\"10,1,25,16777215,0,0,u,3\">晚</d><d p=\"2.5,5,25,255,0,0,u,1\" custom=\"keep\">早&lt;&amp;</d><d p=\"2.5,4,25,255,0,0,u,2\">同秒</d></i>";
+            string sorted = DanmuCatalog.SortXmlForPlayback(unordered);
+            var sortedXml = DanmuCatalog.ParseXml(sorted); var sortedRows = sortedXml.GetElementsByTagName("d");
+            SelfTests.Assert(sortedRows[0].InnerText == "早<&" && sortedRows[1].InnerText == "同秒" && sortedRows[2].InnerText == "晚" && ((System.Xml.XmlElement)sortedRows[0]).GetAttribute("custom") == "keep" && sortedXml.GetElementsByTagName("chatserver")[0].InnerText == "fixture", "跳转兼容排序保留同秒顺序、时间、正文、属性与元数据", report);
+            SelfTests.Assert(DanmuCatalog.SortXmlForPlayback(sorted) == sorted, "已排序弹幕保持原始文件内容且不重复改写", report);
+            rejected = false; try { DanmuCatalog.SortXmlForPlayback("<i><d p=\"NaN,1,25,1\">无效</d></i>"); } catch (InvalidDataException) { rejected = true; }
+            SelfTests.Assert(rejected, "无效弹幕时间拒绝保存，已有文件不受影响", report);
         }
         static int FreePort() { var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); int port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop(); return port; }
     }

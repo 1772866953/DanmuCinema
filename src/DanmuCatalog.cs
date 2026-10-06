@@ -353,7 +353,7 @@ namespace DanmuCinema
                 var result = Json.Object(await Fetch(p, "/api/v2/comment/" + remote + "?format=json&withRelated=true", null, cancellation)); EnsureSuccess(result);
                 content = CommentsToXml(Json.Array(result, "Comments"), "dandan");
             }
-            ParseXml(content); return content;
+            return SortXmlForPlayback(content);
         }
         public static string CommentsToXml(object[] rows, string source)
         {
@@ -397,6 +397,28 @@ namespace DanmuCinema
             using (var reader = XmlReader.Create(new StringReader(content), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null })) xml.Load(reader);
             if (xml.DocumentElement == null || xml.DocumentElement.Name != "i") throw new InvalidDataException("来源返回了无效弹幕 XML");
             return xml;
+        }
+        public static string SortXmlForPlayback(string content)
+        {
+            var xml = ParseXml(content);
+            var rows = xml.DocumentElement.ChildNodes.OfType<XmlElement>().Where(x => x.Name == "d").ToArray();
+            var times = new Dictionary<XmlElement, double>();
+            bool ordered = true; double previous = -1;
+            foreach (var row in rows)
+            {
+                double time;
+                if (!Double.TryParse(row.GetAttribute("p").Split(',')[0], NumberStyles.Float, CultureInfo.InvariantCulture, out time) || Double.IsNaN(time) || Double.IsInfinity(time) || time < 0)
+                    throw new InvalidDataException("弹幕时间无效，原文件未更改。请尝试其他来源。");
+                times[row] = time;
+                if (time < previous) ordered = false;
+                previous = time;
+            }
+            if (ordered) return content;
+            // Stable ordering preserves equal-time comments, text and all attributes.
+            // This helps clients seek by time; screen positions remain client-owned.
+            var sorted = rows.OrderBy(x => times[x]).Select(x => x.CloneNode(true)).ToArray();
+            for (int i = 0; i < rows.Length; i++) xml.DocumentElement.ReplaceChild(sorted[i], rows[i]);
+            return xml.OuterXml;
         }
         static object ApiAnime(Dictionary<string, object> a, object[] eps = null)
         {
