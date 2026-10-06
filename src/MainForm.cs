@@ -11,7 +11,7 @@ using System.Xml;
 
 namespace DanmuCinema
 {
-    public sealed class MainForm : Form
+    public sealed partial class MainForm : Form
     {
         readonly AppSettings settings;
         readonly ServiceManager services;
@@ -39,6 +39,7 @@ namespace DanmuCinema
             this.settings = settings; this.startHidden = startHidden; this.forceStart = forceStart;
             services = new ServiceManager(settings);
             gateway = new DanmuGateway(settings);
+            scheduler = new Scheduler(new SystemClock());
             Text = "弹幕影院 · DanmuCinema";
             Font = new Font("Microsoft YaHei UI", 10F);
             BackColor = Color.FromArgb(241, 244, 248);
@@ -56,6 +57,9 @@ namespace DanmuCinema
             menu.Items.Add("启动服务", null, async (s, e) => await Execute(StartAll));
             menu.Items.Add("停止服务", null, async (s, e) => await Execute(StopAll));
             menu.Items.Add("打开媒体库", null, (s, e) => OpenBrowser(LocalUrl + "/web/"));
+            traySchedule = menu.Items.Add("当前没有定时任务", null, (s, e) => { RestoreWindow(); Navigate("schedule"); });
+            trayCancelSchedule = menu.Items.Add("取消定时", null, (s, e) => CancelSchedule());
+            trayCancelSchedule.Enabled = false;
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("退出并停止服务", null, (s, e) => { exitRequested = true; Close(); });
             tray.ContextMenuStrip = menu;
@@ -64,10 +68,15 @@ namespace DanmuCinema
             if (File.Exists(Paths.LogPath)) logs.Text = String.Join(Environment.NewLine, File.ReadLines(Paths.LogPath).Reverse().Take(160).Reverse()) + Environment.NewLine;
             timer = new System.Windows.Forms.Timer { Interval = 4000 };
             timer.Tick += async (s, e) => { if (showSignal.WaitOne(0)) RestoreWindow(); await UpdateStatus(); };
+            scheduleTimer = new System.Windows.Forms.Timer { Interval = 250 };
+            scheduleTimer.Tick += async (s, e) => await TickSchedule();
+            KeyPreview = true;
+            KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape && scheduler.Active) { CancelSchedule(); e.SuppressKeyPress = true; } };
             Shown += async (s, e) =>
             {
                 if (startHidden) HideToTray();
                 timer.Start();
+                scheduleTimer.Start();
                 if (forceStart || settings.StartServicesOnLaunch || services.OwnsProcess) await Execute(StartAll);
                 else await UpdateStatus();
             };
@@ -82,13 +91,14 @@ namespace DanmuCinema
             var sidebar = new Panel { Dock = DockStyle.Left, Width = 182, BackColor = ink, Padding = new Padding(16, 24, 16, 16) };
             var brand = new Label { Text = "DanmuCinema", ForeColor = Color.White, Font = new Font("Segoe UI", 14, FontStyle.Bold), Dock = DockStyle.Top, Height = 48 };
             var brandHint = new Label { Text = "你的家庭弹幕影院", ForeColor = Color.FromArgb(155, 174, 193), Dock = DockStyle.Top, Height = 50, Padding = new Padding(1, 6, 0, 0) };
-            var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(0, 20, 0, 0) };
+            var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(0, 20, 0, 0) };
             AddNavigation(nav, "overview", "01   服务总览");
             AddNavigation(nav, "library", "02   影片与弹幕");
             AddNavigation(nav, "connect", "03   连接 iPad");
             AddNavigation(nav, "setup", "04   首次设置");
             AddNavigation(nav, "settings", "05   启动与偏好");
-            AddNavigation(nav, "logs", "06   运行日志");
+            AddNavigation(nav, "schedule", "06   定时任务");
+            AddNavigation(nav, "logs", "07   运行日志");
             var version = new Label { Dock = DockStyle.Bottom, Height = 72, ForeColor = Color.FromArgb(155, 174, 193), Text = "DanmuCinema v1.2\r\nJellyfin + Danmu", Font = new Font("Segoe UI", 9), Padding = new Padding(0, 16, 0, 0) };
             sidebar.Controls.Add(nav); sidebar.Controls.Add(version); sidebar.Controls.Add(brandHint); sidebar.Controls.Add(brand);
             var workspace = new Panel { Dock = DockStyle.Fill, Padding = new Padding(28, 22, 28, 14) };
@@ -100,7 +110,7 @@ namespace DanmuCinema
             body = new Panel { Dock = DockStyle.Fill };
             workspace.Controls.Add(body); workspace.Controls.Add(footer); workspace.Controls.Add(header);
             Controls.Add(workspace); Controls.Add(sidebar);
-            BuildOverview(); BuildLibrary(); BuildConnect(); BuildSetup(); BuildSettings(); BuildLogs();
+            BuildOverview(); BuildLibrary(); BuildConnect(); BuildSetup(); BuildSettings(); BuildSchedule(); BuildLogs();
             Navigate("overview");
         }
         void AddNavigation(FlowLayoutPanel parent, string key, string text)
@@ -283,13 +293,14 @@ namespace DanmuCinema
             selectedPage = key;
             foreach (var pair in pages) pair.Value.Visible = pair.Key == key;
             foreach (var pair in navigation) { pair.Value.BackColor = pair.Key == key ? accent : ink; pair.Value.ForeColor = pair.Key == key ? Color.White : Color.FromArgb(185, 200, 215); }
-            var headings = new Dictionary<string, string> { { "overview", "服务总览" }, { "library", "影片与弹幕" }, { "connect", "连接 iPad" }, { "setup", "首次设置" }, { "settings", "启动与偏好" }, { "logs", "运行日志" } };
+            var headings = new Dictionary<string, string> { { "overview", "服务总览" }, { "library", "影片与弹幕" }, { "connect", "连接 iPad" }, { "setup", "首次设置" }, { "settings", "启动与偏好" }, { "schedule", "定时任务" }, { "logs", "运行日志" } };
             title.Text = headings[key];
+            if (key == "schedule") { subtitle.Text = "设置倒计时或指定时间，托盘中继续运行。"; return; }
             subtitle.Text = key == "settings" ? "让启动、后台运行和退出按你的习惯工作。" : key == "library" ? "搜索本地影片，检查弹幕，修正匹配。" : key == "connect" ? "复制地址，在播放器中添加你的电脑。" : key == "setup" ? "一次设置账号与媒体库，之后直接启动即可。" : "在电脑管理媒体，在 iPad 原画播放。";
         }
         async Task Execute(Func<Task> action)
         {
-            if (busy || closing) return;
+            if (busy || closing || scheduler.State == ScheduleState.Executing) return;
             busy = true; UseWaitCursor = true; footer.Text = "正在处理，请稍候…";
             try { await action(); if (footer.Text == "正在处理，请稍候…") footer.Text = "操作完成"; }
             catch (Exception e) { Log.Write(e.Message); footer.Text = e.Message; if (Visible) MessageBox.Show(this, e.Message, "操作未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning); else Notify("需要处理", e.Message); }
@@ -492,12 +503,24 @@ namespace DanmuCinema
             if (finalClose) return;
             if (e.CloseReason == CloseReason.WindowsShutDown || e.CloseReason == CloseReason.TaskManagerClosing)
             {
-                timer.Stop(); return;
+                timer.Stop(); scheduleTimer.Stop(); CancelSchedule(); return;
             }
             e.Cancel = true;
             if (closing) return;
             if (!exitRequested && settings.CloseToTray) { HideToTray(); return; }
             if (busy) { footer.Text = "当前操作尚未完成，请稍后再退出。"; return; }
+            if (scheduler.State == ScheduleState.Executing) { footer.Text = "定时操作正在执行，请稍后退出。"; return; }
+            if (scheduler.Active)
+            {
+                // Do not dispatch a power action through the exit confirmation dialog.
+                scheduleTimer.Stop();
+                if (MessageBox.Show(this, "当前定时尚未完成。退出将取消任务，确定退出？", "退出弹幕影院", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                {
+                    scheduler.OnResume(); scheduleWarningShown = false; scheduleTimer.Start();
+                    exitRequested = false; return;
+                }
+            }
+            CancelSchedule();
             closing = true; timer.Stop(); footer.Text = "正在停止服务并退出…";
             try { await StopAll(); finalClose = true; tray.Visible = false; Close(); }
             catch (Exception error) { closing = false; exitRequested = false; timer.Start(); MessageBox.Show(this, "停止服务失败：" + error.Message, "退出未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
@@ -526,6 +549,7 @@ namespace DanmuCinema
             if (disposing)
             {
                 Log.Added -= AppendLog;
+                scheduler.Cancel(); ReleaseScheduleAwake(); scheduleTimer.Dispose();
                 timer.Dispose(); tray.Dispose(); showSignal.Dispose(); services.Dispose(); gateway.Dispose(); appIcon.Dispose();
             }
             base.Dispose(disposing);
