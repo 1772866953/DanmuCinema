@@ -506,6 +506,8 @@ namespace DanmuCinema
         static void OpenFile(string path) { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); }
         static Icon MakeIcon()
         {
+            using (var stream = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("DanmuCinema.AppIcon"))
+                if (stream != null) using (var embedded = new Icon(stream, new Size(64, 64))) return (Icon)embedded.Clone();
             using (var bitmap = new Bitmap(64, 64))
             using (var graphics = Graphics.FromImage(bitmap))
             {

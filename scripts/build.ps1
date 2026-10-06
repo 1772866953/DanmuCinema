@@ -7,9 +7,11 @@ New-Item -ItemType Directory -Path (Join-Path $projectRoot 'bin') -Force | Out-N
 $sources = Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Filter '*.cs' | ForEach-Object FullName
 $outputName = if ($env:DANMU_BUILD_UPDATE -eq '1') { 'DanmuCinema.updated.exe' } else { 'DanmuCinema.exe' }
 $output = Join-Path (Join-Path $projectRoot 'bin') $outputName
-& $compiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 /utf8output "/out:$output" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Net.Http.dll /reference:System.Web.dll /reference:System.Web.Extensions.dll /reference:System.Security.dll /reference:System.Xml.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll $sources
+$icon = Join-Path $projectRoot 'assets\DanmuCinema.ico'
+& $compiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 /utf8output "/out:$output" "/win32icon:$icon" "/resource:$icon,DanmuCinema.AppIcon" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Net.Http.dll /reference:System.Web.dll /reference:System.Web.Extensions.dll /reference:System.Security.dll /reference:System.Xml.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll $sources
 if ($LASTEXITCODE -ne 0) { throw '编译失败。' }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'src\DanmuCinema.exe.config') -Destination ($output + '.config') -Force
+& (Join-Path $PSScriptRoot 'create-shortcuts.ps1')
 Write-Output "构建完成：$output"
 if ($Test) {
     $testProcess = Start-Process -FilePath $output -ArgumentList '--self-test' -WindowStyle Hidden -Wait -PassThru

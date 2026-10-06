@@ -2,6 +2,8 @@
 
 英文名称、可执行文件与启动脚本已统一为 DanmuCinema。首次从源码安装时运行 `scripts/install-components.ps1` 和 `scripts/build.ps1`，之后运行 `Start.cmd` 或 `bin/DanmuCinema.exe`。
 
+根目录的 `DanmuCinema.lnk` 和 `启动弹幕影院.lnk` 提供带图标的启动入口，调用原 `Start.cmd`；程序、任务栏和托盘使用同款图标。构建时自动生成快捷方式。如果移动了项目目录，运行 `scripts/create-shortcuts.ps1` 更新快捷方式的路径。
+
 ## 智能搜索匹配
 
 在本地影片列表选择一集并打开「搜索匹配弹幕」，默认自动开始查询。勾选「智能搜索匹配」时会清理字幕组、画质、编码和季集标签，并在未找到合适结果时尝试清理后的名称及短标题。每个来源最多尝试三个搜索词，共享 15 秒期限。
