@@ -13,12 +13,12 @@ namespace DanmuCinema
         ComboBox scheduleMode, scheduleAction;
         NumericUpDown scheduleHours, scheduleMinutes, scheduleSeconds;
         DateTimePicker scheduleDate, scheduleTime;
-        CheckBox scheduleAwake, scheduleDemo;
+        CheckBox scheduleAwake;
         Control scheduleEditor, delayInputs, presetInputs, dateInputs;
         Button scheduleStart, scheduleCancel;
         Label scheduleCountdown, scheduleStatus, scheduleTarget, scheduleDescription;
         ProgressBar scheduleProgress;
-        bool scheduleWarningShown, scheduleAwakeHeld, scheduleSimulation;
+        bool scheduleWarningShown, scheduleAwakeHeld;
         double scheduleInitialSeconds;
 
         void BuildSchedule()
@@ -70,16 +70,13 @@ namespace DanmuCinema
             scheduleDescription = TextLabel(PowerActions.Description(PowerAction.StopServices), 42); Add(inputs, scheduleDescription);
             scheduleAction.SelectedIndexChanged += (s, e) => scheduleDescription.Text = PowerActions.Description((PowerAction)scheduleAction.SelectedIndex);
             scheduleAwake = new CheckBox { Text = "定时期间阻止电脑自动睡眠（屏幕仍可熄灭）", AutoSize = true };
-            scheduleDemo = new CheckBox { Text = "演练模式：到时仅显示完成，不停止服务或操作系统", AutoSize = true };
-            Add(inputs, Actions(scheduleAwake)); Add(inputs, Actions(scheduleDemo)); Add(stack, editor);
+            Add(inputs, Actions(scheduleAwake)); Add(stack, editor);
             Add(stack, TextLabel("执行前 15 秒提醒，可点击取消或按 Esc；任务开始执行后无法撤回。\r\n倒计时最长 30 天；退出程序会取消任务，再次启动不会恢复。", 58));
             scheduleStart = ScheduleButton("开始定时", true);
             scheduleCancel = ScheduleButton("取消定时", false); scheduleCancel.Enabled = false;
-            var hide = ScheduleButton("收起到托盘", false);
             scheduleStart.Click += (s, e) => StartSchedule();
             scheduleCancel.Click += (s, e) => CancelSchedule();
-            hide.Click += (s, e) => HideToTray();
-            var commands = Actions(scheduleStart, scheduleCancel, hide); commands.Dock = DockStyle.Bottom; commands.Padding = new Padding(0, 8, 0, 0);
+            var commands = Actions(scheduleStart, scheduleCancel); commands.Dock = DockStyle.Bottom; commands.Padding = new Padding(0, 8, 0, 0);
             page.Controls.Add(content); page.Controls.Add(commands);
         }
         Label ScheduleLabel(string text, int width = 90) { return new Label { Text = text, Width = width, Height = 32, TextAlign = ContentAlignment.MiddleLeft, ForeColor = muted }; }
@@ -95,8 +92,7 @@ namespace DanmuCinema
             try
             {
                 var action = (PowerAction)scheduleAction.SelectedIndex;
-                scheduleSimulation = scheduleDemo.Checked;
-                if (!scheduleSimulation) PowerActions.Validate(action);
+                PowerActions.Validate(action);
                 if (scheduleMode.SelectedIndex == 0)
                     scheduler.StartDelay(TimeSpan.FromHours((double)scheduleHours.Value) + TimeSpan.FromMinutes((double)scheduleMinutes.Value) + TimeSpan.FromSeconds((double)scheduleSeconds.Value), action);
                 else
@@ -105,10 +101,10 @@ namespace DanmuCinema
                     if (TimeZoneInfo.Local.IsInvalidTime(local) || TimeZoneInfo.Local.IsAmbiguousTime(local)) throw new ArgumentException("此时间处于夏令时切换区间，请使用倒计时。");
                     scheduler.StartAt(new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local)), action);
                 }
-                if (scheduleAwake.Checked && !scheduleSimulation) { PowerActions.KeepAwake(true); scheduleAwakeHeld = true; }
+                if (scheduleAwake.Checked) { PowerActions.KeepAwake(true); scheduleAwakeHeld = true; }
                 scheduleWarningShown = false; scheduleInitialSeconds = scheduler.Remaining.TotalSeconds;
                 scheduleTarget.Text = "预计执行 " + scheduler.Target.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
-                Log.Write((scheduleSimulation ? "演练" : "定时") + PowerActions.Name(action) + "已开始，" + scheduleTarget.Text);
+                Log.Write("定时" + PowerActions.Name(action) + "已开始，" + scheduleTarget.Text);
                 RenderSchedule();
             }
             catch (Exception error)
@@ -140,7 +136,7 @@ namespace DanmuCinema
             scheduleCountdown.Text = Scheduler.FormatRemaining(scheduler.Remaining);
             scheduleTarget.Text = "预计执行 " + scheduler.Target.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
             scheduleProgress.Value = (int)Math.Max(0, Math.Min(1000, (1 - scheduler.Remaining.TotalSeconds / Math.Max(1, scheduleInitialSeconds)) * 1000));
-            string action = (scheduleSimulation ? "演练 · " : "") + PowerActions.Name(scheduler.Action);
+            string action = PowerActions.Name(scheduler.Action);
             traySchedule.Text = action + " · 剩余 " + scheduleCountdown.Text;
             scheduleStatus.Text = action + (scheduler.State == ScheduleState.Warning ? " · 即将执行，仍可取消" : " · 定时进行中");
             if (busy && scheduler.Remaining <= TimeSpan.FromSeconds(15)) scheduleStatus.Text = action + " · 等待当前操作完成后提醒，仍可取消";
@@ -165,13 +161,10 @@ namespace DanmuCinema
             busy = true;
             try
             {
-                if (!scheduleSimulation)
-                {
-                    if (scheduler.Action == PowerAction.StopServices) await StopAll();
-                    else await Task.Run(() => PowerActions.Execute(scheduler.Action));
-                }
+                if (scheduler.Action == PowerAction.StopServices) await StopAll();
+                else await Task.Run(() => PowerActions.Execute(scheduler.Action));
                 scheduler.Finish(true);
-                scheduleStatus.Text = scheduleSimulation ? "演练完成，未执行实际操作。" : scheduler.Action == PowerAction.StopServices ? "视频与弹幕服务已停止。" : "已向 Windows 提交" + PowerActions.Name(scheduler.Action) + "请求。";
+                scheduleStatus.Text = scheduler.Action == PowerAction.StopServices ? "视频与弹幕服务已停止。" : "已向 Windows 提交" + PowerActions.Name(scheduler.Action) + "请求。";
                 Log.Write(scheduleStatus.Text);
             }
             catch (Exception error)

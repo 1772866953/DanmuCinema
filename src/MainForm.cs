@@ -235,27 +235,39 @@ namespace DanmuCinema
         {
             var stack = Stack(Page("setup"));
             Add(stack, Actions(ActionButton("安装 / 修复运行组件", InstallComponents, true), ActionButton("启动服务器", StartAll, false), ActionButton("打开 Jellyfin 设置", () => { OpenBrowser(LocalUrl + "/web/#!/dashboard"); return Completed(); }, false)));
-            var account = Card("创建或连接管理员账号", 170);
             userName = new TextBox { Text = settings.AdminName, Width = 170, Margin = new Padding(0, 4, 18, 8) };
             password = new TextBox { Width = 230, UseSystemPasswordChar = true, Margin = new Padding(0, 4, 12, 8) };
             var showPassword = new CheckBox { Text = "显示密码", AutoSize = true, Margin = new Padding(0, 6, 0, 8) };
             showPassword.CheckedChanged += (s, e) => password.UseSystemPasswordChar = !showPassword.Checked;
-            var inner = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-            inner.Controls.Add(Actions(new Label { Text = "账号", Width = 50, Height = 32 }, userName, new Label { Text = "密码", Width = 50, Height = 32 }, password, showPassword));
-            inner.Controls.Add(Actions(ActionButton("初始化 / 登录", InitializeAccount, true)));
-            inner.Controls.Add(new Label { Text = "新服务器将创建该账号；已初始化的服务器会登录验证。密码至少 8 位。", AutoSize = true, ForeColor = muted });
-            account.Controls.Add(inner); inner.BringToFront(); Add(stack, account);
-            var media = Card("添加视频目录", 210);
+            Add(stack, SetupCard("创建或连接管理员账号",
+                Actions(new Label { Text = "账号", Width = 50, Height = 32 }, userName, new Label { Text = "密码", Width = 50, Height = 32 }, password, showPassword),
+                Actions(ActionButton("初始化 / 登录", InitializeAccount, true)),
+                new Label { Text = "新服务器将创建该账号；已初始化的服务器会登录验证。密码至少 8 位。", AutoSize = true, ForeColor = muted }));
             mediaFolder = new TextBox { Text = settings.MediaFolder, Width = 470, Margin = new Padding(0, 4, 10, 8) };
             libraryName = new TextBox { Text = settings.LibraryName, Width = 185, Margin = new Padding(0, 4, 14, 8) };
             libraryType = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 155, Margin = new Padding(0, 4, 0, 8) };
             libraryType.Items.AddRange(new object[] { "电影", "电视剧 / 动画" }); libraryType.SelectedIndex = settings.LibraryType == "tvshows" ? 1 : 0;
-            var mediaInner = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-            mediaInner.Controls.Add(Actions(mediaFolder, ActionButton("选择目录", () => { using (var dialog = new FolderBrowserDialog { SelectedPath = mediaFolder.Text }) if (dialog.ShowDialog(this) == DialogResult.OK) mediaFolder.Text = dialog.SelectedPath; return Completed(); }, false)));
-            mediaInner.Controls.Add(Actions(new Label { Text = "媒体库名", Width = 76, Height = 32 }, libraryName, new Label { Text = "类型", Width = 45, Height = 32 }, libraryType, ActionButton("添加媒体库", AddMediaLibrary, true)));
-            mediaInner.Controls.Add(new Label { Text = "电影和剧集建议使用不同目录，可多次添加。弹幕插件会在视频旁保存 XML。", AutoSize = true, ForeColor = muted });
-            media.Controls.Add(mediaInner); mediaInner.BringToFront(); Add(stack, media);
+            Add(stack, SetupCard("添加视频目录",
+                Actions(mediaFolder, ActionButton("选择目录", () => { using (var dialog = new FolderBrowserDialog { SelectedPath = mediaFolder.Text }) if (dialog.ShowDialog(this) == DialogResult.OK) mediaFolder.Text = dialog.SelectedPath; return Completed(); }, false)),
+                Actions(new Label { Text = "媒体库名", Width = 76, Height = 32 }, libraryName, new Label { Text = "类型", Width = 45, Height = 32 }, libraryType, ActionButton("添加媒体库", AddMediaLibrary, true)),
+                new Label { Text = "电影和剧集建议使用不同目录，可多次添加。弹幕插件会在视频旁保存 XML。", AutoSize = true, ForeColor = muted }));
             Add(stack, TextLabel("安装包来自 Jellyfin 官方和开源 Danmu 插件，版本已固定并校验。\r\n服务器账号是 iPad 的登录账号。控制台保存加密登录凭证，不保存你的密码。", 66));
+        }
+        TableLayoutPanel SetupCard(string caption, params Control[] controls)
+        {
+            var card = new TableLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 1, BackColor = Color.White, Padding = new Padding(20, 15, 20, 0) };
+            card.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            Add(card, new Label { Text = caption, AutoSize = true, Font = new Font("Microsoft YaHei UI", 12, FontStyle.Bold), ForeColor = ink });
+            foreach (var control in controls) Add(card, control);
+            card.SizeChanged += (s, e) =>
+            {
+                foreach (var note in controls.OfType<Label>())
+                {
+                    int width = Math.Max(100, card.ClientSize.Width - card.Padding.Horizontal - note.Margin.Horizontal);
+                    if (note.MaximumSize.Width != width) note.MaximumSize = new Size(width, 0);
+                }
+            };
+            return card;
         }
         void BuildSettings()
         {
