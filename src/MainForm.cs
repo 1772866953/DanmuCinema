@@ -50,6 +50,7 @@ namespace DanmuCinema
             MinimumSize = new Size(1000, 700);
             StartPosition = FormStartPosition.CenterScreen;
             AutoScaleMode = AutoScaleMode.Dpi;
+            InitializeWindowMemory();
             appIcon = MakeIcon(); Icon = appIcon;
             BuildLayout();
             libraryMouseNavigation = new LibraryMouseNavigation(this, () => selectedPage == "library" && !busy && !libraryLoading && !closing, NavigateLibraryHistory);
@@ -77,7 +78,16 @@ namespace DanmuCinema
             KeyDown += (s, e) => { if (selectedPage == "library" && e.Alt && (e.KeyCode == Keys.Left || e.KeyCode == Keys.Right)) { NavigateLibraryHistory(e.KeyCode == Keys.Right); e.SuppressKeyPress = true; } else if (e.KeyCode == Keys.Escape && scheduler.Active) { CancelSchedule(); e.SuppressKeyPress = true; } };
             Shown += async (s, e) =>
             {
-                if (startHidden) HideToTray();
+                if (startupStarted) return;
+                startupStarted = true;
+                BeginInvoke(new Action(() =>
+                {
+                    if (IsDisposed || finalClose) return;
+                    ApplyStartupWindowState();
+                    startupShown = true;
+                    if (startHidden) HideToTray();
+                    else SaveWindowPlacement();
+                }));
                 timer.Start();
                 scheduleTimer.Start();
                 if (forceStart || settings.StartServicesOnLaunch || services.OwnsProcess) await Execute(StartAll);
@@ -441,11 +451,10 @@ namespace DanmuCinema
             }
             catch (InvalidOperationException) { }
         }
-        void RestoreWindow() { Show(); ShowInTaskbar = true; WindowState = FormWindowState.Normal; Activate(); }
-        void HideToTray() { Hide(); ShowInTaskbar = false; }
         void Notify(string titleText, string message) { tray.BalloonTipTitle = titleText; tray.BalloonTipText = message; tray.ShowBalloonTip(4000); }
         async void OnClosing(object sender, FormClosingEventArgs e)
         {
+            SaveWindowPlacement();
             if (finalClose) return;
             if (e.CloseReason == CloseReason.WindowsShutDown || e.CloseReason == CloseReason.TaskManagerClosing)
             {
@@ -453,7 +462,7 @@ namespace DanmuCinema
             }
             e.Cancel = true;
             if (closing) return;
-            if (!exitRequested && settings.CloseToTray) { HideToTray(); return; }
+            if (!exitRequested && settings.CloseToTray) { QueueHideToTray(); return; }
             if (busy || libraryLoading) { footer.Text = "当前操作尚未完成，请稍后再退出。"; return; }
             if (scheduler.State == ScheduleState.Executing) { footer.Text = "定时操作正在执行，请稍后退出。"; return; }
             if (scheduler.Active)
@@ -494,6 +503,7 @@ namespace DanmuCinema
         {
             if (disposing)
             {
+                if (placementTimer != null) placementTimer.Dispose();
                 if (libraryMouseNavigation != null) libraryMouseNavigation.Dispose();
                 Log.Added -= AppendLog;
                 scheduler.Cancel(); ReleaseScheduleAwake(); scheduleTimer.Dispose();

@@ -54,6 +54,7 @@ namespace DanmuCinema
                 ScheduleTests.Run(report);
                 LibraryTests.Run(report).GetAwaiter().GetResult();
                 BrowsingTests.Run(report);
+                WindowPlacementTests.Run(report);
                 var invalid = new AppSettings { Port = 80 };
                 bool rejected = false; try { invalid.Validate(); } catch (ArgumentException) { rejected = true; }
                 Assert(rejected, "无效端口配置被拒绝", report);
