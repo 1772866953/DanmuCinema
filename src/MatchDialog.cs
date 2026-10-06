@@ -75,7 +75,7 @@ namespace DanmuCinema
             save.Click += async (s, e) => await Execute(Download);
             saveAll.Click += async (s, e) => await Execute(() => DownloadGroup(false));
             saveSelected.Click += async (s, e) => await Execute(() => DownloadGroup(true));
-            AddScope("单集", save, "仅关联当前影片。已有同名 XML 会先自动备份再替换。", DanmuMatchScope.Single);
+            AddScope("单集", save, "仅关联当前影片。已有同名 XML 将直接覆盖。", DanmuMatchScope.Single);
             if (item != null && Json.Text(item, "Type") != "Movie") AddScope("整个季度", saveAll, "按集号匹配本地整季文件；预览确认后下载，重复或无法识别的集数会跳过。", DanmuMatchScope.Season);
             if (selectedLocal.Length > 1) AddScope("已选 " + selectedLocal.Length + " 个影片", saveSelected, "只更新勾选的同番同季影片，不扩展到整个季度；下载前可再次核对。", DanmuMatchScope.Selection);
             foreach (TabPage page in scopeTabs.TabPages) if ((DanmuMatchScope)page.Tag == scope) scopeTabs.SelectedTab = page;
@@ -173,7 +173,7 @@ namespace DanmuCinema
             using (var reader = XmlReader.Create(new StringReader(content), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null })) xml.Load(reader);
             int count = xml.GetElementsByTagName("d").Count;
             if (count == 0) throw new InvalidOperationException("这集没有可用弹幕，已有文件未更改。");
-            SettingsStore.AtomicWrite(Path.ChangeExtension(video, ".xml"), content);
+            SettingsStore.AtomicWrite(Path.ChangeExtension(video, ".xml"), content, false);
             catalog.RecordAssociation(item, episode.Data);
             Log.Write("已手动关联 " + count + " 条弹幕到选中影片。");
             status.Text = "已保存 " + count + " 条弹幕。重新打开影片即可读取；不同剪辑版本可在播放器调整弹幕时间偏移。";

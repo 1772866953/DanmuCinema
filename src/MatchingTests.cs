@@ -47,13 +47,19 @@ namespace DanmuCinema
             SelfTests.Assert(duplicate.Where(x => x.Number == 1).All(x => !x.Selected), "本地重复版本不自动选择覆盖", report);
             string firstXml = Path.ChangeExtension(Json.Text(videos[2], "Path"), ".xml"); File.WriteAllText(firstXml, "preserve-existing");
             string tenthXml = Path.ChangeExtension(Json.Text(videos[0], "Path"), ".xml"); File.WriteAllText(tenthXml, "old-comments");
+            string secondXml = Path.ChangeExtension(Json.Text(videos[1], "Path"), ".xml"); File.WriteAllText(secondXml, "keep-on-failure");
             var result = await BatchDownloads.Run(plan, e => { if (Json.Text(e, "Number") == "2.0") throw new IOException("test failure"); return Task.FromResult("<i><d p=\"1,1,25,16777215\">test</d></i>"); }, false, CancellationToken.None, null, 0);
-            SelfTests.Assert(result.Saved == 2 && result.Failed == 1 && File.ReadAllText(tenthXml + ".bak") == "old-comments" && File.ReadAllText(Json.Text(videos[0], "Path")) == "synthetic video", "批量下载单集失败不中断，替换备份且视频不改写", report);
+            SelfTests.Assert(result.Saved == 2 && result.Failed == 1 && File.ReadAllText(tenthXml).Contains("test") && !File.Exists(tenthXml + ".bak") && !File.Exists(firstXml + ".bak") && File.ReadAllText(secondXml) == "keep-on-failure" && File.ReadAllText(Json.Text(videos[0], "Path")) == "synthetic video", "批量下载成功直接覆盖、不生成 BAK，失败保留原弹幕且视频不改写", report);
             result = await BatchDownloads.Run(plan, e => { if (Json.Text(e, "Number") == "2.0") { var failed = new TaskCompletionSource<string>(); failed.SetException(new OperationCanceledException("source timeout")); return failed.Task; } return Task.FromResult("<i><d p=\"1,1,25,16777215\">test</d></i>"); }, false, CancellationToken.None, null, 0);
             SelfTests.Assert(result.Failed == 1 && result.Saved == 2 && !result.Cancelled, "上游单集超时不会被误当作用户取消整个批次", report);
             int calls = 0;
             result = await BatchDownloads.Run(plan, e => { calls++; return Task.FromResult("<i/>"); }, true, CancellationToken.None, null, 0);
-            SelfTests.Assert(calls == 1 && result.Skipped == 3, "批量下载保留已有文件，空弹幕不写入", report);
+            SelfTests.Assert(calls == 0 && result.Skipped == 3, "批量下载保留已有文件，不请求下载", report);
+            result = await BatchDownloads.Run(plan, e => Task.FromResult("<i/>"), false, CancellationToken.None, null, 0);
+            SelfTests.Assert(result.Skipped == 3 && File.ReadAllText(secondXml) == "keep-on-failure", "空弹幕不覆盖原有文件", report);
+            string singleXml = Path.Combine(media, "single.xml"); File.WriteAllText(singleXml, "old-single-comments");
+            SettingsStore.AtomicWrite(singleXml, "new-single-comments", false);
+            SelfTests.Assert(File.ReadAllText(singleXml) == "new-single-comments" && !File.Exists(singleXml + ".bak") && !File.Exists(singleXml + ".tmp"), "单集 XML 写入直接覆盖，无 BAK 和残留临时文件", report);
             using (var cancel = new CancellationTokenSource()) { cancel.Cancel(); result = await BatchDownloads.Run(plan, e => Task.FromResult("<i/>"), false, cancel.Token, null, 0); }
             SelfTests.Assert(result.Cancelled && result.Saved == 0, "取消批量下载停止后续文件", report);
             using (var cancel = new CancellationTokenSource())

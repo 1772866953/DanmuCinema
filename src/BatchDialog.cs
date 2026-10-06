@@ -33,7 +33,7 @@ namespace DanmuCinema
                         if (count == 0) { entry.Status = "没有弹幕"; result.Skipped++; }
                         else
                         {
-                            SettingsStore.AtomicWrite(xmlPath, content); entry.Status = "已保存 " + count + " 条"; result.Saved++;
+                            SettingsStore.AtomicWrite(xmlPath, content, false); entry.Status = "已保存 " + count + " 条"; result.Saved++;
                             if (onSaved != null) try { onSaved(entry); } catch { Log.Write("弹幕已保存，附加来源记录失败。"); }
                         }
                     }
@@ -86,7 +86,7 @@ namespace DanmuCinema
             }
             outer.Controls.Add(grid, 0, 1);
             var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(0, 5, 0, 0) };
-            keep = new CheckBox { Text = "保留已有 XML（取消勾选将替换并自动备份）", Checked = keepExisting, AutoSize = true, Margin = new Padding(0, 6, 20, 0) };
+            keep = new CheckBox { Text = "保留已有 XML（取消勾选将直接覆盖）", Checked = keepExisting, AutoSize = true, Margin = new Padding(0, 6, 20, 0) };
             start = new Button { Text = "开始全部下载", AutoSize = true }; stop = new Button { Text = "停止下载", AutoSize = true, Enabled = false };
             start.Click += async (s, e) => await Download(); stop.Click += (s, e) => cancellation.Cancel();
             actions.Controls.Add(keep); actions.Controls.Add(start); actions.Controls.Add(stop); outer.Controls.Add(actions, 0, 2);

@@ -99,7 +99,7 @@ namespace DanmuCinema
                 string firstXml = Path.ChangeExtension(Json.Text(videos[0], "Path"), ".xml"); File.WriteAllText(firstXml, oldXml);
                 var downloaded = await BatchDownloads.Run(plan, episode => catalog.Download(episode), false, CancellationToken.None, null, 0, entry => catalog.RecordAssociation(entry.Local, entry.Remote));
                 model.Replace(videos);
-                SelfTests.Assert(downloaded.Saved == 2 && File.ReadAllText(firstXml).Contains("two.test") && File.ReadAllText(firstXml + ".bak") == oldXml && model.Entries.Take(2).All(x => x.SourceLabel == "来源二") && !model.Entries[2].HasXml, "重新选择仅替换勾选文件，备份旧 XML 并更新弹幕列来源", report);
+                SelfTests.Assert(downloaded.Saved == 2 && File.ReadAllText(firstXml).Contains("two.test") && !File.Exists(firstXml + ".bak") && model.Entries.Take(2).All(x => x.SourceLabel == "来源二") && !model.Entries[2].HasXml, "重新选择直接覆盖勾选文件、不生成 BAK，并更新弹幕列来源", report);
                 int calls = 0;
                 downloaded = await BatchDownloads.Run(plan, episode => { calls++; return catalog.Download(episode); }, true, CancellationToken.None, null, 0);
                 SelfTests.Assert(downloaded.Skipped == 2 && calls == 0, "保留已有 XML 选项仍有效", report);

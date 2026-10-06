@@ -9,16 +9,14 @@ if (!(Test-Path -LiteralPath $assemblyPath)) { throw 'Build DanmuCinema first.' 
 $original = [IO.File]::ReadAllText($file.FullName)
 $sorted = [DanmuCinema.DanmuCatalog]::SortXmlForPlayback($original)
 if ($original -ceq $sorted) { Write-Output 'Already sorted; file unchanged.'; exit 0 }
-if (!$Apply) { Write-Output 'Out-of-order timestamps found. Use -Apply to sort with an original-file backup.'; exit 0 }
-$backupPath = $file.FullName + '.before-sort-' + [DateTime]::Now.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N') + '.bak'
+if (!$Apply) { Write-Output 'Out-of-order timestamps found. Use -Apply to overwrite the XML with sorted comments.'; exit 0 }
 $partialPath = $file.FullName + '.' + [Guid]::NewGuid().ToString('N') + '.partial'
 try {
     [IO.File]::WriteAllText($partialPath, $sorted, (New-Object Text.UTF8Encoding($false)))
     # Stop if another process edited the XML while this script was preparing it.
     if ([IO.File]::ReadAllText($file.FullName) -cne $original) { throw 'XML changed during preparation; no replacement was performed.' }
-    [IO.File]::Replace($partialPath, $file.FullName, $backupPath)
+    [IO.File]::Replace($partialPath, $file.FullName, [NullString]::Value)
     Write-Output ('Sorted XML: ' + $file.FullName)
-    Write-Output ('Original backup: ' + $backupPath)
 } finally {
     if (Test-Path -LiteralPath $partialPath) { Remove-Item -LiteralPath $partialPath -Force }
 }

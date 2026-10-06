@@ -134,11 +134,11 @@ namespace DanmuCinema
             Directory.CreateDirectory(Paths.Data);
             AtomicWrite(Paths.SettingsFile, Json.Write(settings));
         }
-        public static void AtomicWrite(string path, string text)
+        public static void AtomicWrite(string path, string text, bool backup = true)
         {
             var temporary = path + ".tmp";
             File.WriteAllText(temporary, text, new UTF8Encoding(false));
-            if (File.Exists(path)) File.Replace(temporary, path, path + ".bak");
+            if (File.Exists(path)) File.Replace(temporary, path, backup ? path + ".bak" : null);
             else File.Move(temporary, path);
         }
         public static string Protect(string token)
