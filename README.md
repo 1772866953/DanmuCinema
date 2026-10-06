@@ -15,7 +15,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1
 
 Jellyfin 位于 `runtime/jellyfin`，弹幕插件位于 `data/jellyfin/plugins`。默认视频目录为 Windows 当前用户的 Videos 目录，可以在首次设置中修改。
 
-本仓库发布控制台、弹幕适配器的源代码与安装脚本，不包含视频、运行数据库、账号凭证、API 密钥和第三方二进制组件。项目与 Jellyfin 配合运行，没有修改 Jellyfin 服务端源代码。
 
 ## 首次使用
 
