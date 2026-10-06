@@ -27,6 +27,7 @@ namespace DanmuCinema
         Label title, subtitle, footer, serverState, danmuState, pluginState, sessionState;
         TextBox serverAddress, danmuAddress, logs, mediaFolder, libraryName, userName, password;
         HistorySearchBox search;
+        readonly LibraryMouseNavigation libraryMouseNavigation;
         NumericUpDown port, danmuPort;
         ComboBox network, libraryType, closeBehavior;
         CheckBox autoStart, servicesOnLaunch, original;
@@ -51,6 +52,7 @@ namespace DanmuCinema
             AutoScaleMode = AutoScaleMode.Dpi;
             appIcon = MakeIcon(); Icon = appIcon;
             BuildLayout();
+            libraryMouseNavigation = new LibraryMouseNavigation(this, () => selectedPage == "library" && !busy && !libraryLoading && !closing, NavigateLibraryHistory);
             tray = new NotifyIcon { Icon = appIcon, Text = "弹幕影院：服务已停止", Visible = true };
             tray.DoubleClick += (s, e) => RestoreWindow();
             var menu = new ContextMenuStrip();
@@ -72,7 +74,7 @@ namespace DanmuCinema
             scheduleTimer = new System.Windows.Forms.Timer { Interval = 250 };
             scheduleTimer.Tick += async (s, e) => await TickSchedule();
             KeyPreview = true;
-            KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape && scheduler.Active) { CancelSchedule(); e.SuppressKeyPress = true; } };
+            KeyDown += (s, e) => { if (selectedPage == "library" && e.Alt && (e.KeyCode == Keys.Left || e.KeyCode == Keys.Right)) { NavigateLibraryHistory(e.KeyCode == Keys.Right); e.SuppressKeyPress = true; } else if (e.KeyCode == Keys.Escape && scheduler.Active) { CancelSchedule(); e.SuppressKeyPress = true; } };
             Shown += async (s, e) =>
             {
                 if (startHidden) HideToTray();
@@ -492,6 +494,7 @@ namespace DanmuCinema
         {
             if (disposing)
             {
+                if (libraryMouseNavigation != null) libraryMouseNavigation.Dispose();
                 Log.Added -= AppendLog;
                 scheduler.Cancel(); ReleaseScheduleAwake(); scheduleTimer.Dispose();
                 timer.Dispose(); tray.Dispose(); showSignal.Dispose(); services.Dispose(); gateway.Dispose(); appIcon.Dispose();

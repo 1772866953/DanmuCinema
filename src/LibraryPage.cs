@@ -14,7 +14,8 @@ namespace DanmuCinema
         ComboBox librarySort, libraryOrder;
         Label librarySummary;
         Label libraryLocation;
-        string libraryDirectory;
+        readonly LibraryNavigation libraryNavigation = new LibraryNavigation();
+        string libraryDirectory { get { return libraryNavigation.Current.Directory; } }
         DateTime libraryFolderOpened;
         bool libraryLoading, libraryNeedsRefresh = true;
         DateTime libraryLastAttempt, libraryLastRefresh;
@@ -38,7 +39,7 @@ namespace DanmuCinema
             Add(top, Actions(new Label { Text = "排序", Width = 45, Height = 32, TextAlign = ContentAlignment.MiddleLeft }, librarySort, libraryOrder,
                 ActionButton("取消全部选择", () => { library.ClearChecked(); return Completed(); }, false)));
             libraryLocation = new WrappedLabel { Text = "媒体库文件夹", ForeColor = muted, Margin = new Padding(3, 6, 3, 3) };
-            Add(top, Actions(ActionButton("返回文件夹", () => { libraryDirectory = null; search.Clear(); ApplyLibraryView(); return Completed(); }, false), libraryLocation));
+            Add(top, Actions(ActionButton("返回文件夹", () => { libraryNavigation.UpdateFilter(search.Text); if (libraryNavigation.Visit(null, "")) RestoreLibraryLocation(); return Completed(); }, false), libraryLocation));
             Add(top, Actions(ActionButton("选择弹幕来源", MatchDanmu, false), ActionButton("管理接口", EditSources, false),
                 ActionButton("刷新选中弹幕", RefreshDanmu, false), ActionButton("导出 XML", InspectDanmu, false), ActionButton("影片详情", OpenItemDetails, false)));
             librarySummary = new WrappedLabel { Text = libraryNotice, ForeColor = muted }; Add(top, librarySummary);
@@ -60,12 +61,13 @@ namespace DanmuCinema
             };
             library.DanmuRequested += ShowDanmuOptions;
             library.CellDoubleClick += async (s, e) => { if (e.RowIndex < 0 || e.RowIndex >= library.Rows.Count || e.ColumnIndex <= 0 || (DateTime.UtcNow - libraryFolderOpened).TotalMilliseconds < 500) return; var entry = (LibraryEntry)library.Rows[e.RowIndex].Tag; if (entry.IsFolder) OpenLibraryFolder(entry); else if (library.Columns[e.ColumnIndex].Name != "danmu") await Execute(OpenItemDetails); };
-            var hint = new WrappedLabel { Text = "点击文件夹查看影片。左上角复选框全选当前列表，勾选文件夹会选择其中影片。\r\n输入名称或路径筛选；支持数字顺序排序、圈选和 Ctrl / Shift 多选。▾ 查看和删除搜索历史。", ForeColor = muted, Dock = DockStyle.Bottom };
+            var hint = new WrappedLabel { Text = "点击文件夹查看影片，鼠标侧键可后退 / 前进。左上角复选框全选当前列表，勾选文件夹会选择其中影片。\r\n输入名称或路径筛选；支持数字顺序排序、圈选和 Ctrl / Shift 多选。点击搜索框查看和删除历史。", ForeColor = muted, Dock = DockStyle.Bottom };
             page.Controls.Add(library); page.Controls.Add(hint); page.Controls.Add(top);
         }
         void ApplyLibraryView()
         {
             if (library == null || librarySort == null || libraryOrder == null) return;
+            libraryNavigation.UpdateFilter(search.Text);
             var entries = mediaLibrary.Browse(libraryDirectory, search.Text, (LibrarySort)librarySort.SelectedIndex, libraryOrder.SelectedIndex == 1);
             library.SetEntries(entries);
             libraryLocation.Text = libraryDirectory == null ? "媒体库文件夹" : libraryDirectory == "" ? "未分类影片" : libraryDirectory;
@@ -77,7 +79,19 @@ namespace DanmuCinema
         void OpenLibraryFolder(LibraryEntry entry)
         {
             if (!entry.IsFolder) return;
-            libraryDirectory = entry.FolderPath; libraryFolderOpened = DateTime.UtcNow; ApplyLibraryView();
+            libraryNavigation.UpdateFilter(search.Text);
+            if (libraryNavigation.Visit(entry.FolderPath, search.Text)) { libraryFolderOpened = DateTime.UtcNow; ApplyLibraryView(); }
+        }
+        void NavigateLibraryHistory(bool forward)
+        {
+            if (selectedPage != "library" || busy || libraryLoading || closing) return;
+            libraryNavigation.UpdateFilter(search.Text);
+            if (forward ? libraryNavigation.Forward() : libraryNavigation.Back()) RestoreLibraryLocation();
+        }
+        void RestoreLibraryLocation()
+        {
+            libraryFolderOpened = DateTime.UtcNow;
+            search.RestoreText(libraryNavigation.Current.Filter); ApplyLibraryView();
         }
         void UpdateLibrarySummary()
         {

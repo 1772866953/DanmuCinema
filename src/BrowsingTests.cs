@@ -30,6 +30,13 @@ namespace DanmuCinema
             public void Down(Point p) { OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, p.X, p.Y, 0)); }
             public void Up(Point p) { OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, p.X, p.Y, 0)); }
         }
+        sealed class HistoryBox : HistorySearchBox
+        {
+            public int OpenCount;
+            public bool FocusHistory;
+            public HistoryBox() : base("history-click") { }
+            public override void ShowHistory(bool focusHistory = true) { OpenCount++; FocusHistory = focusHistory; PrepareHistory(); }
+        }
         public static void Run(List<string> report)
         {
             string root = Path.Combine(Paths.Root, "browse-fixture"), first = Path.Combine(root, "Show2"), second = Path.Combine(root, "Show10");
@@ -51,7 +58,7 @@ namespace DanmuCinema
             SearchHistory.Clear("history-test");
             SelfTests.Assert(SearchHistory.List("history-test").Length == 0 && SearchHistory.List("history-other").Length == 1 && !File.Exists(Path.Combine(Paths.Data, "search-history.json.bak")), "清空历史持久保存，无备份残留已删除的搜索词", report);
             Exception failure = null;
-            var thread = new Thread(() => { try { GridChecks(model, report); HistoryChecks(report); LayoutChecks(model, report); } catch (Exception ex) { failure = ex; } });
+            var thread = new Thread(() => { try { GridChecks(model, report); HistoryChecks(report); NavigationChecks(report); LayoutChecks(model, report); } catch (Exception ex) { failure = ex; } });
             thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
             if (failure != null) throw new Exception("浏览与布局控件测试失败", failure);
         }
@@ -104,6 +111,56 @@ namespace DanmuCinema
                 SelfTests.Assert(SearchHistory.List("history-control").Length == 0 && list.Items.Count == 0, "下拉框清空全部历史，即时更新且不会自动恢复", report);
                 box.Text = "new-search"; box.Commit();
                 SelfTests.Assert(SearchHistory.List("history-control").SequenceEqual(new[] { "new-search" }), "删除历史后，输入新查询仍可正常保存", report);
+            }
+            using (var box = new HistoryBox { Size = new Size(350, 36), Text = "原始搜索" })
+            {
+                Invoke(box.EditorControl, "OnMouseDown", new MouseEventArgs(MouseButtons.Left, 1, 20, 10, 0));
+                SelfTests.Assert(box.OpenCount == 1 && !box.FocusHistory && box.Text == "原始搜索", "点击文本框自动展开历史，保留输入焦点和原有文本", report);
+                Invoke(box.EditorControl, "OnMouseDown", new MouseEventArgs(MouseButtons.Right, 1, 20, 10, 0));
+                SelfTests.Assert(box.OpenCount == 1, "文本框右键保留编辑菜单，不强制展开历史", report);
+                Invoke(box.EditorControl, "OnKeyDown", new KeyEventArgs(Keys.Alt | Keys.Down));
+                SelfTests.Assert(box.OpenCount == 2 && box.FocusHistory, "键盘展开历史时可聚焦记录列表", report);
+                Invoke(box.ArrowControl, "OnClick", EventArgs.Empty);
+                SelfTests.Assert(box.OpenCount == 3 && !box.FocusHistory && box.ArrowControl.Text == "" && box.ArrowControl.FlatAppearance.BorderSize == 0 && box.EditorControl.BorderStyle == BorderStyle.None, "下拉按钮统一边框，使用绘制箭头且保留编辑焦点", report);
+                box.RestoreText("恢复的筛选词"); box.Commit();
+                SelfTests.Assert(!SearchHistory.List("history-click").Contains("恢复的筛选词"), "导航恢复筛选词不会自动写回已删除的搜索历史", report);
+                foreach (float size in new[] { 10f, 15f, 20f })
+                {
+                    box.Font = new Font("Microsoft YaHei UI", size); box.PerformLayout();
+                    SelfTests.Assert(box.EditorControl.Bottom < box.Height && box.EditorControl.Right < box.ArrowControl.Left && box.ArrowControl.Bottom < box.Height, "统一搜索框在 " + size + "pt 字体下无重叠或裁切", report);
+                    using (var bitmap = new Bitmap(box.Width, box.Height)) box.DrawToBitmap(bitmap, box.ClientRectangle);
+                }
+            }
+        }
+        static void NavigationChecks(List<string> report)
+        {
+            var history = new LibraryNavigation();
+            SelfTests.Assert(!history.Back() && !history.Forward() && history.Current.Directory == null, "浏览历史初始位于文件夹列表，边界前后退不改变内容", report);
+            history.UpdateFilter("root-filter"); history.Visit("season-a", "root-filter"); history.UpdateFilter("episode-2");
+            SelfTests.Assert(history.Back() && history.Current.Directory == null && history.Current.Filter == "root-filter" && history.CanForward, "后退恢复先前目录及其筛选词", report);
+            SelfTests.Assert(history.Forward() && history.Current.Directory == "season-a" && history.Current.Filter == "episode-2", "前进恢复进入的目录及最新筛选词", report);
+            history.Visit(null, "");
+            SelfTests.Assert(history.Back() && history.Current.Directory == "season-a", "返回文件夹按钮的导航也进入浏览历史", report);
+            history.Visit("season-b", "new-filter");
+            SelfTests.Assert(!history.CanForward && !history.Visit("season-b", "new-filter"), "后退后进入新目录清除旧前进分支，重复进入不新增历史", report);
+            using (var form = new Form()) using (var editor = new TextBox()) using (var other = new Form())
+            {
+                form.Controls.Add(editor); IntPtr parentHandle = form.Handle, childHandle = editor.Handle, otherHandle = other.Handle;
+                int back = 0, forward = 0; bool enabled = true;
+                using (var filter = new LibraryMouseNavigation(form, () => enabled, next => { if (next) forward++; else back++; }))
+                {
+                    var down = Message.Create(childHandle, 0x20B, new IntPtr(1 << 16), IntPtr.Zero);
+                    var up = Message.Create(childHandle, 0x20C, new IntPtr(1 << 16), IntPtr.Zero);
+                    SelfTests.Assert(filter.PreFilterMessage(ref down) && back == 0 && filter.PreFilterMessage(ref up) && back == 1, "鼠标侧键后退在释放时只执行一次，并拦截控件默认点击", report);
+                    up = Message.Create(childHandle, 0x20C, new IntPtr(2 << 16), IntPtr.Zero);
+                    SelfTests.Assert(filter.PreFilterMessage(ref up) && forward == 1, "鼠标第二侧键触发前进，文本框等子控件也支持", report);
+                    var command = Message.Create(parentHandle, 0x319, IntPtr.Zero, new IntPtr(1 << 16));
+                    SelfTests.Assert(filter.PreFilterMessage(ref command) && back == 2, "兼容鼠标驱动发送的浏览器后退命令", report);
+                    enabled = false;
+                    SelfTests.Assert(!filter.PreFilterMessage(ref up) && forward == 1, "离开影片界面或操作忙碌时不触发目录导航", report);
+                    enabled = true; up = Message.Create(otherHandle, 0x20C, new IntPtr(2 << 16), IntPtr.Zero);
+                    SelfTests.Assert(!filter.PreFilterMessage(ref up) && forward == 1, "其他窗口及匹配弹窗不会误触发主窗口前进后退", report);
+                }
             }
         }
         static IEnumerable<Control> Children(Control control)

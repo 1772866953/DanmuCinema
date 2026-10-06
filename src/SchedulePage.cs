@@ -189,6 +189,7 @@ namespace DanmuCinema
         }
         protected override void WndProc(ref Message message)
         {
+            if (libraryMouseNavigation != null && libraryMouseNavigation.PreFilterMessage(ref message)) return;
             if (message.Msg == 0x218 && (message.WParam.ToInt32() == 0x12 || message.WParam.ToInt32() == 0x7) && scheduler != null)
             { scheduler.OnResume(); scheduleWarningShown = false; }
             base.WndProc(ref message);
