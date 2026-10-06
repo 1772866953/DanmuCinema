@@ -17,7 +17,7 @@ namespace DanmuCinema.Desktop
                 var settings = SettingsStore.Load(); AutoStart.Migrate();
                 try { DandanConfig.Ensure(settings); } catch { Log.Write("官方源配置无效，其他来源可继续使用。"); }
                 controller = new DesktopController(application, settings);
-                application.DispatcherUnhandledException += (s, e) => { Log.Write("界面错误：" + e.Exception); MessageBox.Show(e.Exception.Message, "弹幕影院", MessageBoxButton.OK, MessageBoxImage.Error); e.Handled = true; };
+                application.DispatcherUnhandledException += (s, e) => { Log.Write("界面错误：" + e.Exception); AlertWindow.Show(controller.Window == null ? null : controller.Window.View, "界面操作未完成", e.Exception.Message, false); e.Handled = true; };
                 application.Startup += async (s, e) => { if (!args.Contains("--tray")) controller.ShowWindow(); await controller.Initialize(args.Contains("--start")); };
                 application.SessionEnding += (s, e) => { controller.CancelSchedule(); controller.Dispose(); };
                 return application.Run();

@@ -132,7 +132,7 @@ namespace DanmuCinema.Desktop
             catch (Exception e)
             {
                 Status = e.Message; Log.Write(e.Message);
-                if (Window != null) System.Windows.MessageBox.Show(Window.View, e.Message, "操作未完成", MessageBoxButton.OK, MessageBoxImage.Warning);
+                if (Window != null) AlertWindow.Show(Window.View, "操作未完成", e.Message, false);
                 else Notify("需要处理", e.Message);
             }
             finally { Busy = false; Publish(); }
@@ -332,7 +332,7 @@ namespace DanmuCinema.Desktop
             if (Scheduler.Active)
             {
                 scheduleTimer.Stop(); ShowWindow();
-                if (System.Windows.MessageBox.Show(Window.View, "当前定时尚未完成。退出将取消任务，确定退出？", "退出弹幕影院", MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
+                if (!AlertWindow.Show(Window.View, "退出弹幕影院", "当前定时尚未完成。退出将取消任务，确定退出？", true))
                 { Scheduler.OnResume(); warningShown = false; scheduleTimer.Start(); return; }
             }
             CancelSchedule(); Closing = true; statusTimer.Stop(); Status = "正在停止服务并退出…"; Publish();

@@ -7,6 +7,8 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Interop;
+using System.Runtime.InteropServices;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -15,6 +17,7 @@ namespace DanmuCinema.Desktop
 {
     public static class DesktopTests
     {
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
         public static int Run()
         {
             // All settings, geometry, histories and screenshots stay in a disposable fixture.
@@ -58,6 +61,7 @@ namespace DanmuCinema.Desktop
                 controller.ShowWindow(); Pump(); controller.Scheduler.StartDelay(TimeSpan.FromMinutes(20), PowerAction.StopServices);
                 controller.ReleaseWindow(); Pump(); Assert(controller.Scheduler.Active, "释放界面不取消后台定时任务", report); controller.Scheduler.Cancel();
                 TestHistory(report);
+                TestPresentation(controller, report, output);
                 TestLibraryControls(controller, report);
                 TestDialogs(controller, report, output);
                 TestBackgroundBatch(controller, report);
@@ -106,6 +110,41 @@ namespace DanmuCinema.Desktop
             controller.Window.Navigate("settings"); Pump(); var box = Descendants<TextBox>(controller.Window.View).First(); box.Text = "18096";
             controller.ReleaseWindow(); Pump(); controller.ShowWindow(); Pump();
             Assert(Descendants<TextBox>(controller.Window.View).First().Text == "18096", "托盘恢复保留尚未保存的设置编辑", report);
+        }
+        static void TestPresentation(DesktopController controller, List<string> report, string output)
+        {
+            controller.ShowWindow(); controller.Window.Navigate("library"); Pump();
+            var window = controller.Window.View;
+            var search = Descendants<HistoryInput>(window).Single();
+            var mouseDown = new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonDownEvent };
+            search.Editor.RaiseEvent(mouseDown); Pump();
+            Assert(search.IsHistoryOpen && !mouseDown.Handled && System.Windows.Input.Mouse.Captured == null, "首次点击历史输入不截获鼠标或消费编辑点击", report);
+            var historyArrow = search.Children.OfType<Button>().Single();
+            Assert(!historyArrow.Focusable, "历史箭头不抢占编辑焦点", report);
+            Assert(((ScrollViewer)search.Editor.Template.FindName("PART_ContentHost", search.Editor)).Background != null, "空白编辑区域参与鼠标命中", report);
+            var outside = (Button)window.FindName("Maximize");
+            outside.RaiseEvent(new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, System.Windows.Input.MouseButton.Left) { RoutedEvent = System.Windows.Input.Mouse.PreviewMouseDownEvent });
+            Assert(!search.IsHistoryOpen, "点击其他控件直接关闭历史且不阻止本次操作", report);
+            var host = (ContentControl)window.FindName("PageHost");
+            Assert(host.Opacity == 1 && !host.HasAnimatedProperties && ((TranslateTransform)host.RenderTransform).Y == 0, "切页正文始终完全不透明且不发生分数位移", report);
+            Assert(TextOptions.GetTextFormattingMode(host) == TextFormattingMode.Display && TextOptions.GetTextRenderingMode(host) == TextRenderingMode.ClearType, "正文使用像素对齐的 ClearType 渲染", report);
+            Assert(window.WindowStyle == WindowStyle.SingleBorderWindow && outside.Content is System.Windows.Shapes.Path, "自绘标题栏保留系统窗口样式并使用加粗矢量图标", report);
+            var handle = new WindowInteropHelper(window).Handle;
+            Assert((GetWindowLongPtr(handle, -16).ToInt64() & 0x00C00000) == 0x00C00000, "窗口原生 WS_CAPTION 标志存在，支持系统缩放过渡", report);
+            // TRANSITIONS_FORCEDISABLED is documented as a setter-only attribute.
+            Assert(Ui.EnableWindowTransitions(window), "系统窗口过渡设置成功提交给 DWM", report);
+            outside.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle();
+            Assert(window.WindowState == WindowState.Maximized && (string)outside.Tag == "restore", "标题栏原生命令最大化并更新还原图标", report);
+            outside.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle();
+            Assert(window.WindowState == WindowState.Normal && (string)outside.Tag == "maximize", "原生命令还原并保留普通窗口状态", report);
+            var alert = new AlertWindow("退出弹幕影院", "当前定时尚未完成。\n退出将取消任务，确定退出？", true) { Owner = window };
+            bool result = true;
+            alert.Loaded += (s, e) => alert.Dispatcher.BeginInvoke(new Action(() => { Capture(alert, Path.Combine(output, "wpf-alert.png")); alert.Close(); }));
+            result = alert.ShowDialog() == true; Pump();
+            Assert(!result && alert.Content == null, "主题提示框关闭默认为取消并释放控件", report);
+            var info = new AlertWindow("无法匹配", "请先选择影片。\n选择媒体库内的视频后，可以匹配单集或整个季度。", false) { Owner = window };
+            info.Loaded += (s, e) => info.Dispatcher.BeginInvoke(new Action(() => { Capture(info, Path.Combine(output, "wpf-information.png")); Descendants<Button>(info).Single(x => (x.Content as string) == "知道了").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); }));
+            Assert(info.ShowDialog() == true && info.Content == null, "主题信息框确认后关闭并释放控件", report);
         }
         static void TestDialogs(DesktopController controller, List<string> report, string output)
         {

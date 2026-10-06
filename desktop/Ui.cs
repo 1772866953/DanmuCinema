@@ -6,16 +6,26 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using System.Windows.Interop;
+using System.Runtime.InteropServices;
 
 namespace DanmuCinema.Desktop
 {
     public static class Ui
     {
+        [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+        public static bool EnableWindowTransitions(Window window)
+        {
+            // Keep the system's animation policy; only remove our window's opt-out.
+            if (!SystemParameters.MinimizeAnimation) return true;
+            try { int disabled = 0; return DwmSetWindowAttribute(new WindowInteropHelper(window).Handle, 3, ref disabled, sizeof(int)) == 0; } catch (DllNotFoundException) { return false; }
+        }
         public static Brush Brush(string color) { var value = (SolidColorBrush)new BrushConverter().ConvertFromString(color); value.Freeze(); return value; }
         public static object Resource(string name) { return Application.Current.FindResource(name); }
         public static T Load<T>(string name)
@@ -38,7 +48,7 @@ namespace DanmuCinema.Desktop
         public static Border Card(string title, params UIElement[] children)
         {
             var stack = Stack(Text(title, "Heading")); foreach (var child in children) stack.Children.Add(child);
-            return new Border { Background = Brushes.White, BorderBrush = Brush("#E4EBF2"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(14), Padding = new Thickness(22, 20, 22, 18), Margin = new Thickness(0, 0, 0, 18), Child = stack };
+            return new Border { Background = (Brush)Resource("Surface"), BorderBrush = (Brush)Resource("Line"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(14), Padding = new Thickness(22, 20, 22, 18), Margin = new Thickness(0, 0, 0, 18), Child = stack };
         }
         public static ComboBox Combo(IEnumerable<string> values, int selected, double width = 160)
         { var combo = new ComboBox { Width = width, ItemsSource = values.ToArray(), SelectedIndex = selected }; return combo; }
@@ -49,12 +59,34 @@ namespace DanmuCinema.Desktop
         public static TextBlock Label(string text) { return new TextBlock { Text = text, Width = 100, Margin = new Thickness(0, 0, 10, 10), Foreground = (Brush)Resource("Muted") }; }
         public static void Animate(FrameworkElement element)
         {
-            if (!SystemParameters.ClientAreaAnimation) return;
+            // Never animate the text's opacity or position. Transparent intermediate
+            // buffers and fractional translations change WPF glyph antialiasing.
+            element.BeginAnimation(UIElement.OpacityProperty, null);
             var transform = element.RenderTransform as TranslateTransform;
-            if (transform == null) { transform = new TranslateTransform(); element.RenderTransform = transform; }
-            var duration = TimeSpan.FromMilliseconds(220);
-            element.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, duration) { FillBehavior = FillBehavior.Stop });
-            transform.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(14, 0, duration) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop });
+            if (transform != null) { transform.BeginAnimation(TranslateTransform.YProperty, null); transform.Y = 0; }
+            TextOptions.SetTextFormattingMode(element, TextFormattingMode.Display);
+            TextOptions.SetTextRenderingMode(element, TextRenderingMode.ClearType);
+        }
+        public static Border AccentLine()
+        { return new Border { Height = 3, Width = 64, CornerRadius = new CornerRadius(2), Background = (Brush)Resource("AccentGradient"), HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0), IsHitTestVisible = false }; }
+        public static void AnimateAccent(Border line)
+        {
+            if (!SystemParameters.ClientAreaAnimation) return;
+            line.BeginAnimation(FrameworkElement.WidthProperty, new DoubleAnimation(28, 64, TimeSpan.FromMilliseconds(180)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop });
+        }
+        public static System.Windows.Shapes.Path CaptionGlyph(string kind)
+        {
+            string data = kind == "minimize" ? "M 1,7 L 13,7" : kind == "maximize" ? "M 2,2 L 12,2 12,12 2,12 Z" : kind == "restore" ? "M 5,2 L 12,2 12,9 M 2,5 L 9,5 9,12 2,12 Z" : "M 2,2 L 12,12 M 12,2 L 2,12";
+            var path = new System.Windows.Shapes.Path { Data = Geometry.Parse(data), Width = 14, Height = 14, StrokeThickness = 2, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round, Stretch = Stretch.Uniform, IsHitTestVisible = false };
+            path.SetBinding(System.Windows.Shapes.Shape.StrokeProperty, new System.Windows.Data.Binding("Foreground") { RelativeSource = new System.Windows.Data.RelativeSource(System.Windows.Data.RelativeSourceMode.FindAncestor, typeof(Button), 1) }); return path;
+        }
+        public static void ConfigureCaption(Button button, string kind)
+        { button.Content = CaptionGlyph(kind); button.Style = (Style)Resource("Caption"); button.Tag = kind; AutomationProperties.SetName(button, kind == "minimize" ? "最小化" : kind == "maximize" || kind == "restore" ? "最大化 / 还原" : "关闭"); }
+        public static Grid Atmosphere()
+        {
+            var background = new Grid { IsHitTestVisible = false, ClipToBounds = true };
+            background.Children.Add(new System.Windows.Shapes.Ellipse { Width = 320, Height = 220, Fill = Brush("#244D659F"), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -100, -80, 0), Effect = new System.Windows.Media.Effects.BlurEffect { Radius = 65 } });
+            background.Children.Add(new System.Windows.Shapes.Ellipse { Width = 250, Height = 220, Fill = Brush("#183A9FAD"), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(-80, 0, 0, -90), Effect = new System.Windows.Media.Effects.BlurEffect { Radius = 60 } }); return background;
         }
         public static void StopAnimations(DependencyObject root)
         {
@@ -82,19 +114,24 @@ namespace DanmuCinema.Desktop
         readonly StackPanel list;
         readonly DispatcherTimer remember;
         readonly string scope;
+        Window owner;
         bool suppressed = true, disposed, restoring;
         public event Action Chosen;
         public HistoryInput(string scope, string text, bool rememberTyping = false)
         {
             this.scope = scope; Width = 290; Margin = new Thickness(0, 0, 10, 10);
             Editor = Ui.Input(text); Editor.Width = Double.NaN; Editor.Margin = new Thickness(0); Editor.Padding = new Thickness(12, 9, 38, 9); Children.Add(Editor);
-            var arrow = Ui.Button("⌄", Toggle); arrow.Width = 32; arrow.HorizontalAlignment = HorizontalAlignment.Right; arrow.Margin = new Thickness(0, 2, 3, 2); arrow.Padding = new Thickness(0); arrow.MinHeight = 32; arrow.Background = Brushes.Transparent; arrow.BorderThickness = new Thickness(0); arrow.ToolTip = "搜索历史"; Children.Add(arrow);
+            var arrow = Ui.Button("", Toggle); arrow.Focusable = false; AutomationProperties.SetName(arrow, "搜索历史"); arrow.Content = new System.Windows.Shapes.Path { Data = Geometry.Parse("M 1,1 L 5,5 9,1"), Stroke = (Brush)Ui.Resource("Muted"), StrokeThickness = 2, Width = 10, Height = 6, Stretch = Stretch.Uniform, IsHitTestVisible = false }; arrow.Width = 32; arrow.HorizontalAlignment = HorizontalAlignment.Right; arrow.Margin = new Thickness(0, 2, 3, 2); arrow.Padding = new Thickness(0); arrow.MinHeight = 32; arrow.Background = Brushes.Transparent; arrow.BorderThickness = new Thickness(0); arrow.ToolTip = "搜索历史"; Children.Add(arrow);
             list = new StackPanel();
-            popup = new Popup { PlacementTarget = this, Placement = PlacementMode.Bottom, StaysOpen = false, AllowsTransparency = true, PopupAnimation = PopupAnimation.Fade };
+            // StaysOpen=false captures the mouse and interrupts the editor's first click.
+            // Outside clicks are observed on the owner without consuming that click.
+            popup = new Popup { PlacementTarget = this, Placement = PlacementMode.Bottom, StaysOpen = true, AllowsTransparency = true, PopupAnimation = PopupAnimation.None, Focusable = false };
             var body = Ui.Stack(Ui.Row(Ui.Text("搜索历史"), Ui.Button("清空历史", () => { SearchHistory.Clear(scope); suppressed = true; BuildHistory(); })), new ScrollViewer { Content = list, MaxHeight = 300, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
-            popup.Child = new Border { Width = Width, Child = body, Background = Brushes.White, BorderBrush = Ui.Brush("#DDE6F0"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(10), Margin = new Thickness(0, 4, 0, 0) };
+            var surface = new Border { Width = Width, Child = body, Background = (Brush)Ui.Resource("Surface"), BorderBrush = (Brush)Ui.Resource("Line"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(10), Margin = new Thickness(0, 4, 0, 0) };
+            TextElement.SetForeground(surface, (Brush)Ui.Resource("Ink")); popup.Child = surface;
             remember = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1000) }; remember.Tick += RememberTick;
             Editor.PreviewMouseLeftButtonDown += (s, e) => { if (!popup.IsOpen) OpenHistory(); };
+            Loaded += AttachOwner; Unloaded += DetachOwner;
             Editor.TextChanged += (s, e) => { suppressed = restoring; if (rememberTyping && !restoring) { remember.Stop(); remember.Start(); } };
             Editor.LostKeyboardFocus += (s, e) => { if (rememberTyping && !popup.IsOpen) Commit(); };
             Editor.PreviewKeyDown += (s, e) => { if (e.Key == Key.Escape) popup.IsOpen = false; if (e.Key == Key.Enter) { popup.IsOpen = false; Commit(); } if (e.Key == Key.Down && !popup.IsOpen) { OpenHistory(); e.Handled = true; } };
@@ -104,8 +141,17 @@ namespace DanmuCinema.Desktop
         public void RestoreText(string text)
         { remember.Stop(); restoring = true; try { Editor.Text = text ?? ""; suppressed = true; } finally { restoring = false; } }
         void RememberTick(object sender, EventArgs e) { remember.Stop(); Commit(); }
-        void Toggle() { if (popup.IsOpen) popup.IsOpen = false; else OpenHistory(); }
-        void OpenHistory() { BuildHistory(); popup.IsOpen = true; }
+        void Toggle() { Editor.Focus(); if (popup.IsOpen) popup.IsOpen = false; else OpenHistory(); }
+        void OpenHistory() { if (disposed) return; BuildHistory(); popup.IsOpen = true; }
+        public bool IsHistoryOpen { get { return popup.IsOpen; } }
+        void AttachOwner(object sender, RoutedEventArgs e)
+        { if (disposed || owner != null) return; owner = Window.GetWindow(this); if (owner != null) { owner.PreviewMouseDown += OutsideClick; owner.Deactivated += OwnerDeactivated; owner.LocationChanged += OwnerMoved; } }
+        void DetachOwner(object sender, RoutedEventArgs e)
+        { popup.IsOpen = false; if (owner == null) return; owner.PreviewMouseDown -= OutsideClick; owner.Deactivated -= OwnerDeactivated; owner.LocationChanged -= OwnerMoved; owner = null; }
+        void OutsideClick(object sender, MouseButtonEventArgs e)
+        { if (popup.IsOpen && !Object.ReferenceEquals(Ui.Ancestor<HistoryInput>(e.OriginalSource as DependencyObject), this)) popup.IsOpen = false; }
+        void OwnerDeactivated(object sender, EventArgs e) { popup.IsOpen = false; }
+        void OwnerMoved(object sender, EventArgs e) { popup.IsOpen = false; }
         void BuildHistory()
         {
             list.Children.Clear(); var terms = SearchHistory.List(scope);
@@ -119,6 +165,6 @@ namespace DanmuCinema.Desktop
                 Grid.SetColumn(remove, 1); row.Children.Add(choose); row.Children.Add(remove); list.Children.Add(row);
             }
         }
-        public void Dispose() { if (disposed) return; Commit(); disposed = true; remember.Stop(); remember.Tick -= RememberTick; popup.IsOpen = false; popup.Child = null; popup.PlacementTarget = null; list.Children.Clear(); Chosen = null; }
+        public void Dispose() { if (disposed) return; Commit(); disposed = true; DetachOwner(this, null); Loaded -= AttachOwner; Unloaded -= DetachOwner; remember.Stop(); remember.Tick -= RememberTick; popup.IsOpen = false; popup.Child = null; popup.PlacementTarget = null; list.Children.Clear(); Chosen = null; }
     }
 }

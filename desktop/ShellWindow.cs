@@ -51,8 +51,10 @@ namespace DanmuCinema.Desktop
                 button.Content = Ui.Row(new TextBlock { Text = icons[i], FontFamily = new FontFamily("Segoe MDL2 Assets"), Width = 30, FontSize = 15 }, Ui.Text(titles[i]));
                 navigation[key] = button; nav.Children.Add(button);
             }
-            ((Button)View.FindName("Minimize")).Click += (s, e) => View.WindowState = WindowState.Minimized;
-            ((Button)View.FindName("Maximize")).Click += (s, e) => View.WindowState = View.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+            var atmosphere = Ui.Atmosphere(); Grid.SetRowSpan(atmosphere, 4); ((Grid)View.FindName("WorkArea")).Children.Insert(0, atmosphere);
+            Ui.ConfigureCaption((Button)View.FindName("Minimize"), "minimize"); Ui.ConfigureCaption((Button)View.FindName("Maximize"), "maximize"); Ui.ConfigureCaption((Button)View.FindName("Close"), "close");
+            ((Button)View.FindName("Minimize")).Click += (s, e) => SystemCommands.MinimizeWindow(View);
+            ((Button)View.FindName("Maximize")).Click += (s, e) => { if (View.WindowState == WindowState.Maximized) SystemCommands.RestoreWindow(View); else SystemCommands.MaximizeWindow(View); };
             ((Button)View.FindName("Close")).Click += (s, e) => View.Close();
             placement = WindowPlacementStore.Load();
             placementTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(650) }; placementTimer.Tick += PlacementTick;
@@ -75,6 +77,7 @@ namespace DanmuCinema.Desktop
         }
         void SourceInitialized(object sender, EventArgs e)
         {
+            Ui.EnableWindowTransitions(View);
             var source = (HwndSource)PresentationSource.FromVisual(View);
             var target = source.CompositionTarget;
             if (placement != null && placement.Valid)
@@ -101,7 +104,7 @@ namespace DanmuCinema.Desktop
         void LocationChanged(object sender, EventArgs e) { RememberPlacement(); }
         void StateChanged(object sender, EventArgs e)
         {
-            ((Button)View.FindName("Maximize")).Content = View.WindowState == WindowState.Maximized ? "❐" : "□";
+            Ui.ConfigureCaption((Button)View.FindName("Maximize"), View.WindowState == WindowState.Maximized ? "restore" : "maximize");
             // Native minimize never replaces the last usable normal/maximized state.
             RememberPlacement();
             if (View.WindowState == WindowState.Minimized) viewTimer.Stop(); else if (session.Page == "schedule") viewTimer.Start();
@@ -162,12 +165,12 @@ namespace DanmuCinema.Desktop
         {
             if (!navigation.ContainsKey(key)) key = "overview";
             SavePageState(); ClearPage(); session.Page = key;
-            foreach (var pair in navigation) { pair.Value.Background = Ui.Brush(pair.Key == key ? "#087F75" : "#0014243A"); pair.Value.Foreground = Ui.Brush(pair.Key == key ? "#FFFFFF" : "#AEBED2"); }
+            foreach (var pair in navigation) { pair.Value.Background = Ui.Brush(pair.Key == key ? "#344668" : "#0014243A"); pair.Value.Foreground = Ui.Brush(pair.Key == key ? "#FFFFFF" : "#AEBED2"); }
             var titles = new Dictionary<string, string> { { "overview", "服务总览" }, { "library", "影片与弹幕" }, { "connect", "连接 iPad" }, { "setup", "首次设置" }, { "settings", "启动与偏好" }, { "schedule", "定时任务" }, { "logs", "运行日志" } };
             ((TextBlock)View.FindName("Heading")).Text = titles[key];
             ((TextBlock)View.FindName("Subtitle")).Text = key == "library" ? "浏览媒体库，选择影片，为每一集找到合适的弹幕。" : key == "schedule" ? "倒计时或指定时间，托盘中继续运行。" : key == "connect" ? "连接你的电脑，在 iPad 上原画播放。" : key == "settings" ? "让启动、播放和后台运行按你的习惯工作。" : key == "setup" ? "设置账号和媒体库，开启你的家庭影院。" : "在电脑管理媒体，在 iPad 原画播放。";
             page = key == "library" ? BuildLibrary() : key == "overview" ? BuildOverview() : key == "connect" ? BuildConnect() : key == "setup" ? BuildSetup() : key == "settings" ? BuildSettings() : key == "schedule" ? BuildSchedule() : BuildLogs();
-            host.Content = page; Ui.Animate(host); Render();
+            host.Content = page; Ui.Animate(host); Ui.AnimateAccent((Border)View.FindName("PageAccent")); Render();
             if (key == "schedule") viewTimer.Start(); else viewTimer.Stop();
             double offset;
             if (session.ScrollOffsets.TryGetValue(key, out offset)) page.Loaded += (s, e) => { var scroll = Ui.Child<ScrollViewer>((DependencyObject)s); if (scroll != null) scroll.ScrollToVerticalOffset(offset); };
@@ -282,7 +285,7 @@ namespace DanmuCinema.Desktop
                     else { DateTime local; if (!DateTime.TryParseExact(date.Text + " " + time.Text, "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out local)) throw new ArgumentException("请使用 yyyy-MM-dd 和 HH:mm:ss 格式填写时间。"); target = local; }
                     controller.StartSchedule(delay, target, (PowerAction)actions.SelectedIndex, awake.IsChecked == true);
                 }
-                catch (Exception error) { MessageBox.Show(View, error.Message, "无法开始定时", MessageBoxButton.OK, MessageBoxImage.Information); }
+                catch (Exception error) { AlertWindow.Show(View, "无法开始定时", error.Message, false); }
             }, true);
             scheduleCancel = Ui.Button("取消定时", controller.CancelSchedule);
             var dock = new DockPanel();
@@ -330,7 +333,7 @@ namespace DanmuCinema.Desktop
                 session.Match = new MatchState { Item = item, Selected = selected ?? new Dictionary<string, object>[0], Scope = scope, Keyword = item == null ? session.Filter : MediaNames.SearchTitle(item), AnimeOnly = item != null && Json.Text(item, "Type") == "Movie" ? false : controller.Settings.AnimeOnly };
                 OpenMatchWindow(true);
             }
-            catch (Exception e) { MessageBox.Show(View, e.Message, "无法匹配", MessageBoxButton.OK, MessageBoxImage.Information); }
+            catch (Exception e) { AlertWindow.Show(View, "无法匹配", e.Message, false); }
         }
         sealed class NativeOwner : Forms.IWin32Window
         { public NativeOwner(Window window) { Handle = new WindowInteropHelper(window).Handle; } public IntPtr Handle { get; private set; } }
