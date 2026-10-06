@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $outDir = Join-Path $root 'downloads\source-research'
-$headers = @{ 'User-Agent' = 'DanMuLAN/1.0 (local personal media controller)' }
+$headers = @{ 'User-Agent' = 'DanmuCinema/1.0 (local personal media controller)' }
 $search = '骸骨骑士'
 $probes = @(
     @{Name='bangumi-search';Url='https://api.bgm.tv/v0/search/subjects?limit=20';Method='POST';Body=(@{keyword=$search;filter=@{type=@(2)}}|ConvertTo-Json -Depth 4)},

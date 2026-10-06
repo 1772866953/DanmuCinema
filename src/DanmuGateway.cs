@@ -9,7 +9,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace DanMuLAN
+namespace DanmuCinema
 {
     // Small GET-only gateway. Large media files never pass through this process.
     public sealed class DanmuGateway : IDisposable
@@ -75,7 +75,7 @@ namespace DanMuLAN
                     if (!AllowedAddress(endpoint.Address)) { await Reply(stream, 403, "application/json", Encoding.UTF8.GetBytes("{}"), timeout.Token); return; }
                     if (first[1] == "/health")
                     {
-                        await Reply(stream, 200, "application/json; charset=utf-8", Encoding.UTF8.GetBytes("{\"service\":\"DanMu LAN\",\"status\":\"running\"}"), timeout.Token);
+                        await Reply(stream, 200, "application/json; charset=utf-8", Encoding.UTF8.GetBytes("{\"service\":\"DanmuCinema\",\"status\":\"running\"}"), timeout.Token);
                         return;
                     }
                     string route;

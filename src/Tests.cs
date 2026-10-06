@@ -10,7 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace DanMuLAN
+namespace DanmuCinema
 {
     public static class SelfTests
     {
@@ -39,7 +39,7 @@ namespace DanMuLAN
                 Assert(DanmuGateway.ValidateRoute("/secret/api/v2/comment/../System", "secret", out route) == 404, "路径穿越被拒绝", report);
                 Assert(DanmuGateway.ValidateRoute("/secret/api/v2/comment/%2e%2e", "secret", out route) != 200, "编码路径穿越被拒绝", report);
                 Assert(!DanmuGateway.AllowedAddress(IPAddress.Parse("8.8.8.8")) && DanmuGateway.AllowedAddress(IPAddress.Parse("192.168.1.9")), "网关仅接受本机与私有网络", report);
-                Assert(AutoStart.Quote(@"C:\路径 with space\DanMuLAN.exe") == "\"C:\\路径 with space\\DanMuLAN.exe\"" && AutoStart.Quote("C:\\folder\\") == "\"C:\\folder\\\\\"", "开机启动命令正确处理空格和尾部反斜杠", report);
+                Assert(AutoStart.Quote(@"C:\路径 with space\DanmuCinema.exe") == "\"C:\\路径 with space\\DanmuCinema.exe\"" && AutoStart.Quote("C:\\folder\\") == "\"C:\\folder\\\\\"", "开机启动命令正确处理空格和尾部反斜杠", report);
                 Assert(Json.Text(Json.Object("{\"version\":\"12.1\",\"items\":[1]}"), "Version") == "12.1", "插件与服务器 JSON 字段大小写兼容", report);
                 var source = Json.Object("{\"site_id\":\"youku\",\"episode_size\":12}");
                 Assert(Json.Text(source, "SiteId") == "youku" && Json.Text(source, "EpisodeSize") == "12", "真实插件 snake_case 来源字段兼容", report);
@@ -50,6 +50,7 @@ namespace DanMuLAN
                 Assert(MediaNames.Matches(generic, "中文剧集") && MediaNames.SearchTitle(generic) == "中文剧集", "普通视频可按中文父目录搜索和发现弹幕", report);
                 Assert(MediaNames.SearchTitle(romanized) == "骸骨骑士大人冒险中" && MediaNames.EpisodeLabel(romanized).Contains("集号未识别"), "候选搜索清理 S 季号且未识别集数明确提示", report);
                 CatalogTests.Run(report).GetAwaiter().GetResult();
+                MatchingTests.Run(report).GetAwaiter().GetResult();
                 var invalid = new AppSettings { Port = 80 };
                 bool rejected = false; try { invalid.Validate(); } catch (ArgumentException) { rejected = true; }
                 Assert(rejected, "无效端口配置被拒绝", report);

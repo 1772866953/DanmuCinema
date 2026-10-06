@@ -13,7 +13,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
 
-namespace DanMuLAN
+namespace DanmuCinema
 {
     public sealed class CatalogSearch
     {
@@ -45,7 +45,7 @@ namespace DanMuLAN
             // requests still use the dedicated proxy-free JellyfinApi client.
             http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false });
             http.Timeout = TimeSpan.FromSeconds(20);
-            http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "DanMuLAN/1.1 (local personal media controller)");
+            http.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "DanmuCinema/1.2");
             try
             {
                 if (File.Exists(CachePath))
@@ -120,12 +120,13 @@ namespace DanMuLAN
                     if (body != null) request.Content = new StringContent(Json.Write(body), Encoding.UTF8, "application/json");
                     if (provider.Id == "dandan")
                     {
-                        string secret = SettingsStore.Unprotect(settings.EncryptedDandanSecret);
-                        if (String.IsNullOrWhiteSpace(settings.DandanAppId) || String.IsNullOrWhiteSpace(secret)) throw new InvalidOperationException("需配置 AppId / AppSecret");
+                        var credentials = DandanConfig.Load();
+                        string secret = credentials.Secret;
+                        if (!credentials.Ready) throw new InvalidOperationException("官方源未就绪");
                         string timestamp = ((long)(DateTime.UtcNow - new DateTime(1970, 1, 1)).TotalSeconds).ToString(CultureInfo.InvariantCulture);
-                        request.Headers.TryAddWithoutValidation("X-AppId", settings.DandanAppId);
+                        request.Headers.TryAddWithoutValidation("X-AppId", credentials.AppId.Trim());
                         request.Headers.TryAddWithoutValidation("X-Timestamp", timestamp);
-                        using (var sha = SHA256.Create()) request.Headers.TryAddWithoutValidation("X-Signature", Convert.ToBase64String(sha.ComputeHash(Encoding.UTF8.GetBytes(settings.DandanAppId + timestamp + path.Split('?')[0] + secret))));
+                        using (var sha = SHA256.Create()) request.Headers.TryAddWithoutValidation("X-Signature", Convert.ToBase64String(sha.ComputeHash(Encoding.UTF8.GetBytes(credentials.AppId.Trim() + timestamp + path.Split('?')[0] + secret))));
                     }
                     using (var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token))
                     {
@@ -164,15 +165,17 @@ namespace DanMuLAN
                 { "Category", category }, { "Site", site == "" ? provider.Name : provider.Name + " · " + site }
             };
         }
-        async Task<object[]> SearchProvider(Provider p, string keyword)
+        async Task<object[]> SearchProvider(Provider p, string keyword, CancellationToken cancellation)
         {
-            using (var searchTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+            using (var searchTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
             {
+            searchTimeout.CancelAfter(TimeSpan.FromSeconds(15));
             var list = new List<object>();
             if (p.Id == "jellyfin")
             {
-                using (var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+                using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(searchTimeout.Token))
                 {
+                    timeout.CancelAfter(TimeSpan.FromSeconds(15));
                     var result = Json.Read<object[]>(await api.Request("GET", "api/danmu/search?keyword=" + Uri.EscapeDataString(keyword), null, true, timeout.Token));
                     foreach (Dictionary<string, object> a in result) list.Add(Anime(p, Json.Text(a, "Id"), Json.Text(a, "Name"), Json.Text(a, "Year"), Json.Text(a, "EpisodeSize"), Json.Text(a, "Category"), Json.Text(a, "SiteId")));
                 }
@@ -216,23 +219,38 @@ namespace DanMuLAN
             return list.ToArray();
             }
         }
-        public async Task<CatalogSearch> Search(string keyword, bool animeOnly)
+        public async Task<CatalogSearch> Search(string keyword, bool animeOnly, bool smart = true, int season = 0)
         {
             if (String.IsNullOrWhiteSpace(keyword)) throw new ArgumentException("请输入作品名。");
             if (keyword.Length > 200) throw new ArgumentException("搜索词过长。");
+            if (season == 0 && smart) season = SmartMatching.SeasonTitle(keyword);
             var providers = Providers();
             var tasks = providers.Select(async p =>
             {
                 try
                 {
-                    var result = await SearchProvider(p, keyword.Trim());
-                    string note = result.Cast<Dictionary<string, object>>().Any(x => Json.Text(x, "SearchNote") != "") ? "短标题回退" : "";
+                    var found = new List<Dictionary<string, object>>(); string note = "";
+                    using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15)))
+                    {
+                        var queries = smart ? SmartMatching.Queries(keyword) : new[] { keyword.Trim() };
+                        for (int attempt = 0; attempt < queries.Length; attempt++)
+                        {
+                            Exception failure = null; object[] rows = null;
+                            try { rows = await SearchProvider(p, queries[attempt], deadline.Token); } catch (Exception error) { failure = error; }
+                            if (failure != null) { if (found.Count == 0) throw failure; break; }
+                            found.AddRange(rows.Cast<Dictionary<string, object>>());
+                            if (attempt > 0) note = "智能搜索回退";
+                            if (rows.Cast<Dictionary<string, object>>().Any(x => Json.Text(x, "SearchNote") != "")) note = "短标题回退";
+                            if (!smart || found.Any(x => SmartMatching.Score(keyword, x, season) >= 70 && (season == 0 || SmartMatching.SeasonTitle(Json.Text(x, "Name")) == season))) break;
+                        }
+                    }
+                    var result = found.GroupBy(x => Json.Text(x, "Id")).Select(x => (object)x.First()).ToArray();
                     return new { Items = result, State = new Dictionary<string, object> { { "Name", p.Name }, { "Count", result.Length }, { "Error", "" }, { "Note", note } } };
                 }
                 catch (Exception e)
                 {
                     // Do not log endpoint URLs, path tokens, AppSecret, or arbitrary upstream messages.
-                    string error = e is OperationCanceledException ? "请求超时" : p.Id == "dandan" && (String.IsNullOrEmpty(settings.DandanAppId) || String.IsNullOrEmpty(SettingsStore.Unprotect(settings.EncryptedDandanSecret))) ? "需配置 AppId / AppSecret" : e is InvalidOperationException && e.Message.StartsWith("HTTP ") ? e.Message : "来源请求失败";
+                    string error = e is OperationCanceledException ? "请求超时" : p.Id == "dandan" && e is InvalidOperationException && e.Message.StartsWith("官方源") ? "未就绪" : e is InvalidOperationException && e.Message.StartsWith("HTTP ") ? e.Message : "来源请求失败";
                     Log.Write("弹幕来源「" + p.Name + "」：" + error);
                     return new { Items = new object[0], State = new Dictionary<string, object> { { "Name", p.Name }, { "Count", 0 }, { "Error", error } } };
                 }
@@ -241,7 +259,7 @@ namespace DanMuLAN
             var all = parts.SelectMany(x => x.Items).Cast<Dictionary<string, object>>().GroupBy(x => Json.Text(x, "Id")).Select(x => x.First()).ToArray();
             var trustedTitles = all.Where(IsAnime).Select(a => Json.Text(a, "Name")).ToArray();
             var filtered = all.Where(a => !animeOnly || IsAnime(a) || trustedTitles.Any(t => SimilarTitle(t, Json.Text(a, "Name"))))
-                .OrderByDescending(a => IsAnime(a)).ThenByDescending(a => SimilarTitle(keyword, Json.Text(a, "Name"))).ThenByDescending(a => Json.Text(a, "Year")).ToArray();
+                .OrderByDescending(a => SmartMatching.Score(keyword, a, season)).ThenByDescending(a => IsAnime(a)).ThenByDescending(a => Json.Text(a, "Provider") == "bahamut").ThenByDescending(a => Json.Text(a, "Year")).ToArray();
             lock (sync)
             {
                 foreach (var a in filtered) animes[Json.Text(a, "Id")] = a;
@@ -255,6 +273,11 @@ namespace DanMuLAN
         {
             string p = Json.Text(item, "Provider"), category = Json.Text(item, "Category");
             return p == "animeko" || p == "bahamut" || Regex.IsMatch(category, "动漫|动画|動畫|番剧|番劇|anime|ova|ona|剧场|劇場", RegexOptions.IgnoreCase);
+        }
+        public async Task<Dictionary<string, object>[]> LocalSeason(Dictionary<string, object> item)
+        {
+            var items = await api.Items("");
+            return items.Cast<Dictionary<string, object>>().Where(x => SmartMatching.SameSeason(item, x)).ToArray();
         }
         public static bool SimilarTitle(string first, string second)
         {
@@ -303,7 +326,8 @@ namespace DanMuLAN
             return new Dictionary<string, object> { { "Id", StableNumber(Json.Text(a, "Provider") + ":" + Json.Text(a, "SiteId") + ":episode:" + remote) },
                 { "AnimeId", Json.Text(a, "Id") }, { "Provider", Json.Text(a, "Provider") }, { "SiteId", Json.Text(a, "SiteId") }, { "CommentId", remote }, { "Number", number }, { "Title", title } };
         }
-        public async Task<string> Download(Dictionary<string, object> episode)
+        public Task<string> Download(Dictionary<string, object> episode) { return Download(episode, CancellationToken.None); }
+        public async Task<string> Download(Dictionary<string, object> episode, CancellationToken cancellation)
         {
             var p = GetProvider(episode); string remote = Uri.EscapeDataString(Json.Text(episode, "CommentId"));
             string content;
@@ -311,22 +335,22 @@ namespace DanMuLAN
             {
                 string site = Json.Text(episode, "SiteId");
                 if (!Regex.IsMatch(site, "^[a-z0-9_-]+$")) throw new InvalidDataException("来源标识无效");
-                content = await api.Request("GET", "api/" + site + "/danmu/" + remote + "/download", null, true);
+                content = await api.Request("GET", "api/" + site + "/danmu/" + remote + "/download", null, true, cancellation);
             }
             else if (p.Id == "animeko")
             {
-                var result = Json.Object(await Fetch(p, "/v1/danmaku/" + remote));
+                var result = Json.Object(await Fetch(p, "/v1/danmaku/" + remote, null, cancellation));
                 content = CommentsToXml(Json.Array(result, "DanmakuList"), "animeko");
             }
             else if (p.Id == "bahamut")
             {
-                var result = Json.Object(await Fetch(p, "/anime/v1/danmu.php?geo=TW%2CHK&videoSn=" + remote)); EnsureSuccess(result);
+                var result = Json.Object(await Fetch(p, "/anime/v1/danmu.php?geo=TW%2CHK&videoSn=" + remote, null, cancellation)); EnsureSuccess(result);
                 content = CommentsToXml(Json.Array(Json.Child(result, "Data"), "Danmu"), "bahamut");
             }
             else
             {
                 // Request JSON: official dandan redirects XML to related sources; JSON is uniform.
-                var result = Json.Object(await Fetch(p, "/api/v2/comment/" + remote + "?format=json&withRelated=true")); EnsureSuccess(result);
+                var result = Json.Object(await Fetch(p, "/api/v2/comment/" + remote + "?format=json&withRelated=true", null, cancellation)); EnsureSuccess(result);
                 content = CommentsToXml(Json.Array(result, "Comments"), "dandan");
             }
             ParseXml(content); return content;

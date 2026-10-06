@@ -1,17 +1,17 @@
-﻿param([string]$Executable = 'DanMuLAN.updated.exe', [string]$Keyword = '骸骨骑士')
+﻿param([string]$Executable = 'DanmuCinema.updated.exe', [string]$Keyword = '骸骨骑士')
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $projectRoot = Split-Path -Parent $PSScriptRoot
 [void][Reflection.Assembly]::LoadFrom((Join-Path $projectRoot ('bin\' + $Executable)))
-[DanMuLAN.Paths]::Root = $projectRoot
-$settings = [DanMuLAN.SettingsStore]::Load()
+[DanmuCinema.Paths]::Root = $projectRoot
+$settings = [DanmuCinema.SettingsStore]::Load()
 $fixture = Join-Path $projectRoot ('tests\output\anime-live-' + (Get-Date -Format yyyyMMdd-HHmmss))
 [void][IO.Directory]::CreateDirectory((Join-Path $fixture 'data'))
-[DanMuLAN.Paths]::Root = $fixture
+[DanmuCinema.Paths]::Root = $fixture
 $portProbe = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
 $portProbe.Start(); $settings.DanmuPort = $portProbe.LocalEndpoint.Port; $portProbe.Stop()
-$settings.EncryptedDanmuKey = [DanMuLAN.SettingsStore]::Protect([Guid]::NewGuid().ToString('N'))
-$gateway = New-Object DanMuLAN.DanmuGateway($settings)
+$settings.EncryptedDanmuKey = [DanmuCinema.SettingsStore]::Protect([Guid]::NewGuid().ToString('N'))
+$gateway = New-Object DanmuCinema.DanmuGateway($settings)
 $report = New-Object 'Collections.Generic.List[string]'
 try {
     $gateway.Start()
@@ -27,7 +27,7 @@ try {
         if ($episode.Count -ne 1 -or $detail.bangumi.episodes.Count -ne 12) { throw ('Expected 12 episodes and episode 3 from ' + $source) }
         $response = Invoke-WebRequest ($base + '/api/v2/comment/' + $episode[0].episodeId + '?format=xml') -UseBasicParsing -TimeoutSec 30
         $content = [Text.Encoding]::UTF8.GetString($response.RawContentStream.ToArray())
-        $xml = [DanMuLAN.DanmuCatalog]::ParseXml($content)
+        $xml = [DanmuCinema.DanmuCatalog]::ParseXml($content)
         $count = $xml.GetElementsByTagName('d').Count
         if ($count -eq 0) { throw ('Empty comments from ' + $source) }
         [IO.File]::WriteAllText((Join-Path $fixture ($source + '-S2-E03.xml')), $content, (New-Object Text.UTF8Encoding($false)))
@@ -41,7 +41,7 @@ try {
     throw
 } finally {
     [void]$gateway.Stop().GetAwaiter().GetResult(); $gateway.Dispose()
-    [DanMuLAN.Paths]::Root = $projectRoot
+    [DanmuCinema.Paths]::Root = $projectRoot
     [IO.File]::WriteAllLines((Join-Path $projectRoot 'tests\output\anime-sources-live.txt'), $report, (New-Object Text.UTF8Encoding($false)))
     $report
 }

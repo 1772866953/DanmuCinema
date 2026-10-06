@@ -16,3 +16,5 @@ tests/output/
 *.log
 *.bak
 *.partial
+config/dandanplay.json
+config/dandanplay.json.*

@@ -9,7 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
 
-namespace DanMuLAN
+namespace DanmuCinema
 {
     public sealed class JellyfinApi : IDisposable
     {
@@ -21,7 +21,7 @@ namespace DanMuLAN
         {
             using (var request = new HttpRequestMessage(new HttpMethod(method), "http://127.0.0.1:" + settings.Port + "/" + route.TrimStart('/')))
             {
-                string authorization = "MediaBrowser Client=\"DanMu LAN\", Device=\"Windows\", DeviceId=\"danmu-lan-controller\", Version=\"1.0.0\"";
+                string authorization = "MediaBrowser Client=\"DanmuCinema\", Device=\"Windows\", DeviceId=\"danmu-lan-controller\", Version=\"1.0.0\"";
                 if (auth)
                 {
                     if (String.IsNullOrEmpty(Token)) throw new InvalidOperationException("请先在「首次设置」中初始化服务器或登录管理员账号。");

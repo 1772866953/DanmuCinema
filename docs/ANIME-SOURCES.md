@@ -17,7 +17,7 @@
 
 ## 来源设置
 
-「影片与弹幕」→「弹幕来源」。默认同时启用 Animeko、巴哈姆特和原有平台。弹弹play 缺少凭证时仅显示「需配置 AppId / AppSecret」，不阻断其他来源。最多可以加入 5 个自定义兼容源。
+「影片与弹幕」→「弹幕来源」。默认同时启用 Animeko、巴哈姆特和原有平台。弹弹play 仅保留来源开关，凭证填写在本机 `config/dandanplay.json`，未就绪不阻断其他来源。最多可以加入 5 个自定义兼容源。智能搜索和本季批量下载见 [使用说明](BATCH-AND-MATCHING.md)。
 
 每行格式：`来源名称|API 根地址`。例如自己的服务 `我的动漫源|http://服务器:端口/访问密钥`。该地址必须支持：
 
@@ -25,7 +25,7 @@
 - `GET /api/v2/bangumi/{animeId}` → `success, bangumi.episodes[]`
 - `GET /api/v2/comment/{episodeId}?format=json` → `comments[]`，每条包含 `p` 和 `m` 或 `text`
 
-配置内容与 AppSecret 使用 DPAPI 加密，只在本机当前用户下解密；网关不把 Jellyfin 凭证发送给外部来源。外部请求遵循 Windows 系统代理，来源超时单独报告。
+自定义 API 配置使用 DPAPI 加密。旧版官方密钥迁移时保留加密；独立配置文件也支持手动填写 AppSecret，真实文件不会上传。网关不把 Jellyfin 凭证发送给外部来源。外部请求遵循 Windows 系统代理，来源超时单独报告。
 
 ## 官方资料
 
@@ -40,7 +40,7 @@
 自检覆盖来源并发、单源错误隔离、动漫过滤、来源 ID 区分、缓存恢复、XML 格式转换，以及实际本机 HTTP 网关调用。真实源测试运行：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-anime-sources.ps1 -Executable DanMuLAN.exe
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-anime-sources.ps1 -Executable DanmuCinema.exe
 ```
 
 它只将公开弹幕样本保存到项目测试目录。报告在 `tests/output/anime-sources-live.txt`。

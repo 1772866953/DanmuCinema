@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace DanMuLAN
+namespace DanmuCinema
 {
     static class Program
     {
@@ -14,11 +14,11 @@ namespace DanMuLAN
             if (args.Contains("--self-test")) return SelfTests.Run();
             if (args.Contains("--integration-test")) return IntegrationTests.Run().GetAwaiter().GetResult();
             bool owner;
-            using (var singleton = new Mutex(true, "Local\\DanMuLAN-" + StableId(Paths.Root), out owner))
+            using (var singleton = new Mutex(true, "Local\\DanmuCinema-" + StableId(Paths.Root), out owner))
             {
                 if (!owner)
                 {
-                    using (var signal = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\DanMuLAN-Show-" + StableId(Paths.Root))) signal.Set();
+                    using (var signal = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\DanmuCinema-Show-" + StableId(Paths.Root))) signal.Set();
                     return 0;
                 }
                 Application.EnableVisualStyles();
@@ -27,6 +27,8 @@ namespace DanMuLAN
                 try
                 {
                     var settings = SettingsStore.Load();
+                    AutoStart.Migrate();
+                    try { DandanConfig.Ensure(settings); } catch { Log.Write("官方源配置无效，其他来源可继续使用。"); }
                     using (var form = new MainForm(settings, args.Contains("--tray"), args.Contains("--start"))) Application.Run(form);
                 }
                 catch (Exception e) { Log.Write("启动错误：" + e.Message); MessageBox.Show(e.Message, "弹幕影院", MessageBoxButtons.OK, MessageBoxIcon.Error); return 1; }

@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml;
 
-namespace DanMuLAN
+namespace DanmuCinema
 {
     public sealed class MainForm : Form
     {
@@ -39,7 +39,7 @@ namespace DanMuLAN
             this.settings = settings; this.startHidden = startHidden; this.forceStart = forceStart;
             services = new ServiceManager(settings);
             gateway = new DanmuGateway(settings);
-            Text = "弹幕影院 · 局域网媒体与弹幕";
+            Text = "弹幕影院 · DanmuCinema";
             Font = new Font("Microsoft YaHei UI", 10F);
             BackColor = Color.FromArgb(241, 244, 248);
             ForeColor = ink;
@@ -59,7 +59,7 @@ namespace DanMuLAN
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("退出并停止服务", null, (s, e) => { exitRequested = true; Close(); });
             tray.ContextMenuStrip = menu;
-            showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\DanMuLAN-Show-" + Program.StableId(Paths.Root));
+            showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\DanmuCinema-Show-" + Program.StableId(Paths.Root));
             Log.Added += AppendLog;
             if (File.Exists(Paths.LogPath)) logs.Text = String.Join(Environment.NewLine, File.ReadLines(Paths.LogPath).Reverse().Take(160).Reverse()) + Environment.NewLine;
             timer = new System.Windows.Forms.Timer { Interval = 4000 };
@@ -80,7 +80,7 @@ namespace DanMuLAN
         void BuildLayout()
         {
             var sidebar = new Panel { Dock = DockStyle.Left, Width = 182, BackColor = ink, Padding = new Padding(16, 24, 16, 16) };
-            var brand = new Label { Text = "DM / LAN", ForeColor = Color.White, Font = new Font("Segoe UI", 21, FontStyle.Bold), Dock = DockStyle.Top, Height = 48 };
+            var brand = new Label { Text = "DanmuCinema", ForeColor = Color.White, Font = new Font("Segoe UI", 14, FontStyle.Bold), Dock = DockStyle.Top, Height = 48 };
             var brandHint = new Label { Text = "你的家庭弹幕影院", ForeColor = Color.FromArgb(155, 174, 193), Dock = DockStyle.Top, Height = 50, Padding = new Padding(1, 6, 0, 0) };
             var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(0, 20, 0, 0) };
             AddNavigation(nav, "overview", "01   服务总览");
@@ -89,7 +89,7 @@ namespace DanMuLAN
             AddNavigation(nav, "setup", "04   首次设置");
             AddNavigation(nav, "settings", "05   启动与偏好");
             AddNavigation(nav, "logs", "06   运行日志");
-            var version = new Label { Dock = DockStyle.Bottom, Height = 72, ForeColor = Color.FromArgb(155, 174, 193), Text = "WINDOWS CONTROLLER\r\nv1.0  ·  Jellyfin + Danmu", Font = new Font("Segoe UI", 9), Padding = new Padding(0, 16, 0, 0) };
+            var version = new Label { Dock = DockStyle.Bottom, Height = 72, ForeColor = Color.FromArgb(155, 174, 193), Text = "DanmuCinema v1.2\r\nJellyfin + Danmu", Font = new Font("Segoe UI", 9), Padding = new Padding(0, 16, 0, 0) };
             sidebar.Controls.Add(nav); sidebar.Controls.Add(version); sidebar.Controls.Add(brandHint); sidebar.Controls.Add(brand);
             var workspace = new Panel { Dock = DockStyle.Fill, Padding = new Padding(28, 22, 28, 14) };
             var header = new Panel { Dock = DockStyle.Top, Height = 95 };

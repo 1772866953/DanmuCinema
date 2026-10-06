@@ -13,7 +13,7 @@ using System.Threading;
 using System.Web.Script.Serialization;
 using Microsoft.Win32;
 
-namespace DanMuLAN
+namespace DanmuCinema
 {
     public class AppSettings
     {
@@ -184,7 +184,19 @@ namespace DanMuLAN
     public static class AutoStart
     {
         const string KeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        const string ValueName = "DanMuLAN";
+        const string ValueName = "DanmuCinema";
+        const string LegacyValueName = "DanMuLAN";
+        public static void Migrate()
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(KeyPath, true))
+            {
+                if (key == null) return;
+                string previous = Convert.ToString(key.GetValue(LegacyValueName));
+                string legacyCommand = Quote(Path.Combine(Paths.Root, "bin", "DanMuLAN.exe")) + " --tray --start";
+                if (previous == legacyCommand || previous == Command)
+                { key.SetValue(ValueName, Command, RegistryValueKind.String); key.DeleteValue(LegacyValueName, false); }
+            }
+        }
         public static bool Enabled
         {
             get { using (var key = Registry.CurrentUser.OpenSubKey(KeyPath)) return key != null && Convert.ToString(key.GetValue(ValueName)) == Command; }
