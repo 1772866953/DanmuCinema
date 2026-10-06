@@ -152,7 +152,7 @@ namespace DanmuCinema
             if (!scheduler.Active || closing) return;
             // Avoid stopping a service while it is being configured or downloading comments.
             // Poll's stall handling gives a fresh cancellation window after a long operation.
-            if (busy) { RenderSchedule(); return; }
+            if (busy || libraryLoading) { RenderSchedule(); return; }
             if (!scheduleWarningShown && scheduler.State == ScheduleState.Warning && scheduler.Remaining <= TimeSpan.Zero) scheduler.OnResume();
             if (!scheduler.Poll()) { RenderSchedule(); return; }
             SetScheduleControls(); ReleaseScheduleAwake();

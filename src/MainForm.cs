@@ -29,7 +29,7 @@ namespace DanmuCinema
         NumericUpDown port, danmuPort;
         ComboBox network, libraryType, closeBehavior;
         CheckBox autoStart, servicesOnLaunch, original;
-        DataGridView library;
+        MediaGrid library;
         bool busy, checking, exitRequested, finalClose, closing;
         string selectedPage = "overview";
         Icon appIcon;
@@ -188,28 +188,6 @@ namespace DanmuCinema
             var label = new Label { Text = value, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Microsoft YaHei UI", 10, FontStyle.Bold) };
             panel.Controls.Add(label, 1, row); return label;
         }
-        void BuildLibrary()
-        {
-            var page = Page("library");
-            var top = new Panel { Dock = DockStyle.Top, Height = 98 };
-            search = new TextBox { Width = 310, Margin = new Padding(0, 6, 12, 8) };
-            search.KeyDown += async (s, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; await Execute(LoadLibrary); } };
-            top.Controls.Add(Actions(ActionButton("搜索匹配弹幕", MatchDanmu, false), ActionButton("弹幕来源", EditSources, false), ActionButton("刷新弹幕", RefreshDanmu, false), ActionButton("导出 XML", InspectDanmu, false), ActionButton("影片详情", OpenItemDetails, false)));
-            top.Controls.Add(Actions(search, ActionButton("搜索本地影片", LoadLibrary, true), ActionButton("扫描媒体库", ScanLibrary, false)));
-            library = new DataGridView { Dock = DockStyle.Fill, BackgroundColor = Color.White, BorderStyle = BorderStyle.None, ReadOnly = true, AllowUserToAddRows = false, AllowUserToDeleteRows = false, AllowUserToResizeRows = false, SelectionMode = DataGridViewSelectionMode.FullRowSelect, MultiSelect = false, AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, RowHeadersVisible = false, EnableHeadersVisualStyles = false, ColumnHeadersHeight = 40, RowTemplate = { Height = 38 } };
-            library.ColumnHeadersDefaultCellStyle.BackColor = Color.FromArgb(229, 237, 243);
-            library.ColumnHeadersDefaultCellStyle.ForeColor = ink;
-            library.DefaultCellStyle.SelectionBackColor = Color.FromArgb(220, 240, 236);
-            library.DefaultCellStyle.SelectionForeColor = ink;
-            library.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 252);
-            library.Columns.Add("name", "影片 / 集数"); library.Columns[0].FillWeight = 50;
-            library.Columns.Add("type", "类型"); library.Columns[1].FillWeight = 12;
-            library.Columns.Add("size", "大小"); library.Columns[2].FillWeight = 15;
-            library.Columns.Add("bitrate", "平均码率"); library.Columns[3].FillWeight = 23;
-            library.CellDoubleClick += async (s, e) => { if (e.RowIndex >= 0) await Execute(OpenItemDetails); };
-            var hint = TextLabel("本地搜索支持影片名、剧集名和文件路径；留空显示全部。在线搜索请点「搜索匹配弹幕」。\r\n季号 / 集号未识别时，自动匹配可能失败；可手动选择弹幕，或到影片详情修正元数据。", 64); hint.Dock = DockStyle.Bottom;
-            page.Controls.Add(library); page.Controls.Add(hint); page.Controls.Add(top);
-        }
         void BuildConnect()
         {
             var stack = Stack(Page("connect"));
@@ -308,11 +286,11 @@ namespace DanmuCinema
             var headings = new Dictionary<string, string> { { "overview", "服务总览" }, { "library", "影片与弹幕" }, { "connect", "连接 iPad" }, { "setup", "首次设置" }, { "settings", "启动与偏好" }, { "schedule", "定时任务" }, { "logs", "运行日志" } };
             title.Text = headings[key];
             if (key == "schedule") { subtitle.Text = "设置倒计时或指定时间，托盘中继续运行。"; return; }
-            subtitle.Text = key == "settings" ? "让启动、后台运行和退出按你的习惯工作。" : key == "library" ? "搜索本地影片，检查弹幕，修正匹配。" : key == "connect" ? "复制地址，在播放器中添加你的电脑。" : key == "setup" ? "一次设置账号与媒体库，之后直接启动即可。" : "在电脑管理媒体，在 iPad 原画播放。";
+            subtitle.Text = key == "settings" ? "让启动、后台运行和退出按你的习惯工作。" : key == "library" ? "浏览和筛选媒体库，批量选择影片，重新匹配弹幕来源。" : key == "connect" ? "复制地址，在播放器中添加你的电脑。" : key == "setup" ? "一次设置账号与媒体库，之后直接启动即可。" : "在电脑管理媒体，在 iPad 原画播放。";
         }
         async Task Execute(Func<Task> action)
         {
-            if (busy || closing || scheduler.State == ScheduleState.Executing) return;
+            if (busy || libraryLoading || closing || scheduler.State == ScheduleState.Executing) return;
             busy = true; UseWaitCursor = true; footer.Text = "正在处理，请稍候…";
             try { await action(); if (footer.Text == "正在处理，请稍候…") footer.Text = "操作完成"; }
             catch (Exception e) { Log.Write(e.Message); footer.Text = e.Message; if (Visible) MessageBox.Show(this, e.Message, "操作未完成", MessageBoxButtons.OK, MessageBoxIcon.Warning); else Notify("需要处理", e.Message); }
@@ -343,58 +321,10 @@ namespace DanmuCinema
             SettingsStore.Save(settings);
         }
         async Task ScanLibrary() { await services.Api.Request("POST", "Library/Refresh", new { }, true); Log.Write("已提交媒体库扫描，弹幕将在影片识别后匹配。"); }
-        async Task LoadLibrary()
-        {
-            object[] items = await services.Api.Items(search.Text.Trim());
-            library.Rows.Clear();
-            foreach (Dictionary<string, object> item in items)
-            {
-                var sources = Json.Array(item, "MediaSources");
-                var source = sources.Length == 0 ? null : sources[0] as Dictionary<string, object>;
-                double size, bitrate;
-                Double.TryParse(Json.Text(source, "Size"), out size); Double.TryParse(Json.Text(source, "Bitrate"), out bitrate);
-                string name = Json.Text(item, "Name");
-                if (Json.Text(item, "Type") == "Episode") name = MediaNames.EpisodeLabel(item);
-                string type = Json.Text(item, "Type");
-                int row = library.Rows.Add(name, type == "Episode" ? "剧集" : type == "Video" ? "视频" : "电影", size == 0 ? "—" : (size / 1e9).ToString("0.0") + " GB", bitrate == 0 ? "—" : (bitrate / 1e6).ToString("0.0") + " Mbps / " + (bitrate / 8e6).ToString("0.0") + " MB/s");
-                library.Rows[row].Tag = item;
-            }
-            Log.Write("影片搜索完成，共 " + items.Length + " 条。");
-            footer.Text = items.Length == 0 ? "本地媒体库没有匹配影片。请扫描媒体库，或点击「搜索匹配弹幕」查询在线来源。" : "找到 " + items.Length + " 个本地视频。选择一行后可搜索并关联弹幕。";
-        }
-        Dictionary<string, object> SelectedItem()
-        {
-            if (library.SelectedRows.Count == 0) throw new InvalidOperationException("请先搜索影片并选择一行。");
-            return library.SelectedRows[0].Tag as Dictionary<string, object>;
-        }
-        async Task RefreshDanmu()
-        {
-            string id = Json.Text(SelectedItem(), "Id");
-            await services.Api.Request("GET", "api/danmu/" + id + "/refresh", null, true);
-            Log.Write("已刷新选中影片弹幕。若暂无结果，可在影片页面手动搜索修正。");
-        }
-        Task MatchDanmu()
-        {
-            var item = library.SelectedRows.Count == 0 ? null : SelectedItem();
-            using (var dialog = new MatchDialog(gateway.Catalog, item, search.Text.Trim(), settings.AnimeOnly)) dialog.ShowDialog(this);
-            return Completed();
-        }
         Task EditSources()
         {
             using (var dialog = new SourcesDialog(settings)) dialog.ShowDialog(this);
             return Completed();
-        }
-        async Task InspectDanmu()
-        {
-            var selected = SelectedItem();
-            if (!File.Exists(Path.ChangeExtension(Json.Text(selected, "Path"), ".xml"))) throw new InvalidOperationException("该视频尚无弹幕 XML。请点击「搜索匹配弹幕」，核对季度和集数后下载关联。");
-            string content = await services.Api.Request("GET", "api/danmu/" + Json.Text(selected, "Id") + "/raw", null, true);
-            if (String.IsNullOrWhiteSpace(content)) throw new InvalidOperationException("这部影片还没有弹幕。请刷新匹配，或打开影片详情搜索修正。");
-            var xml = new XmlDocument { XmlResolver = null };
-            using (var reader = XmlReader.Create(new StringReader(content), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null })) xml.Load(reader);
-            int count = xml.GetElementsByTagName("d").Count;
-            using (var dialog = new SaveFileDialog { Title = "弹幕共 " + count + " 条，选择 XML 导出位置", Filter = "XML 弹幕|*.xml", FileName = SafeFileName(Json.Text(selected, "Name")) + ".xml", InitialDirectory = Paths.Data })
-                if (dialog.ShowDialog(this) == DialogResult.OK) { File.WriteAllText(dialog.FileName, content, new System.Text.UTF8Encoding(false)); Log.Write("已导出 " + count + " 条弹幕。"); }
         }
         static string SafeFileName(string name) { foreach (char invalid in Path.GetInvalidFileNameChars()) name = name.Replace(invalid, '_'); return name; }
         Task OpenItemDetails() { OpenBrowser(LocalUrl + "/web/#!/details?id=" + Uri.EscapeDataString(Json.Text(SelectedItem(), "Id"))); return Completed(); }
@@ -485,6 +415,7 @@ namespace DanmuCinema
             }
             catch { serverState.Text = "服务正在启动或暂时无响应"; }
             finally { checking = false; }
+            await AutoLoadLibrary();
         }
         void UpdateAddresses()
         {
@@ -520,7 +451,7 @@ namespace DanmuCinema
             e.Cancel = true;
             if (closing) return;
             if (!exitRequested && settings.CloseToTray) { HideToTray(); return; }
-            if (busy) { footer.Text = "当前操作尚未完成，请稍后再退出。"; return; }
+            if (busy || libraryLoading) { footer.Text = "当前操作尚未完成，请稍后再退出。"; return; }
             if (scheduler.State == ScheduleState.Executing) { footer.Text = "定时操作正在执行，请稍后退出。"; return; }
             if (scheduler.Active)
             {

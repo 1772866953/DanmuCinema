@@ -13,10 +13,10 @@ namespace DanmuCinema
 {
     public sealed class JellyfinApi : IDisposable
     {
-        readonly HttpClient client = new HttpClient(new HttpClientHandler { UseProxy = false });
+        readonly HttpClient client;
         readonly AppSettings settings;
         public string Token { get { return SettingsStore.Unprotect(settings.EncryptedToken); } }
-        public JellyfinApi(AppSettings settings) { this.settings = settings; client.Timeout = TimeSpan.FromSeconds(45); }
+        public JellyfinApi(AppSettings settings, HttpMessageHandler handler = null) { this.settings = settings; client = new HttpClient(handler ?? new HttpClientHandler { UseProxy = false }); client.Timeout = TimeSpan.FromSeconds(45); }
         public async Task<string> Request(string method, string route, object body, bool auth, CancellationToken cancellation = default(CancellationToken))
         {
             using (var request = new HttpRequestMessage(new HttpMethod(method), "http://127.0.0.1:" + settings.Port + "/" + route.TrimStart('/')))

@@ -52,6 +52,7 @@ namespace DanmuCinema
                 CatalogTests.Run(report).GetAwaiter().GetResult();
                 MatchingTests.Run(report).GetAwaiter().GetResult();
                 ScheduleTests.Run(report);
+                LibraryTests.Run(report).GetAwaiter().GetResult();
                 var invalid = new AppSettings { Port = 80 };
                 bool rejected = false; try { invalid.Validate(); } catch (ArgumentException) { rejected = true; }
                 Assert(rejected, "无效端口配置被拒绝", report);
@@ -119,6 +120,10 @@ namespace DanmuCinema
                     await Task.Delay(1500);
                 }
                 SelfTests.Assert(items.Length > 0, "真实测试视频入库并可搜索", report);
+                var allItems = await manager.Api.Items("");
+                var library = new MediaLibrary(); library.Replace(allItems.Cast<Dictionary<string, object>>());
+                SelfTests.Assert(library.View("", LibrarySort.Name, false).Length == allItems.Length && library.Entries.Any(x => x.Name == filename + ".mp4" && x.HasXml && x.ModifiedUtc.HasValue && x.Size > 0), "真实媒体库无需搜索即可列出视频、XML 状态和文件元数据", report);
+                SelfTests.Assert(library.View("Integration", LibrarySort.Modified, true).Length == 1 && library.View("不存在的影片", LibrarySort.Size, false).Length == 0, "真实入库视频支持本地筛选和排序", report);
                 string itemId = Json.Text((Dictionary<string, object>)items[0], "Id");
                 string xml = await manager.Api.Request("GET", "api/danmu/" + itemId + "/raw", null, true);
                 SelfTests.Assert(xml.Contains("测试弹幕"), "插件 raw 接口读取同名 XML 弹幕", report);

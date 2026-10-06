@@ -219,12 +219,35 @@ namespace DanmuCinema
             return list.ToArray();
             }
         }
-        public async Task<CatalogSearch> Search(string keyword, bool animeOnly, bool smart = true, int season = 0)
+        public Dictionary<string, object>[] SourceChoices()
+        {
+            return Providers().Select(x => new Dictionary<string, object> { { "Id", x.Id }, { "Name", x.Name } }).ToArray();
+        }
+        public void RecordAssociation(Dictionary<string, object> video, Dictionary<string, object> episode)
+        {
+            try
+            {
+                var provider = GetProvider(episode);
+                Dictionary<string, object> anime;
+                lock (sync) animes.TryGetValue(Json.Text(episode, "AnimeId"), out anime);
+                DanmuAssociations.Save(Json.Text(video, "Path"), new DanmuAssociation {
+                    Source = anime == null ? provider.Name : Json.Text(anime, "Site"), Provider = provider.Id,
+                    Anime = Json.Text(anime, "Name"), Episode = Json.Text(episode, "Number") + " " + Json.Text(episode, "Title"), CommentId = Json.Text(episode, "CommentId")
+                });
+            }
+            catch { Log.Write("弹幕 XML 已保存，但来源记录未更新；可重新选择来源。"); }
+        }
+        public async Task<CatalogSearch> Search(string keyword, bool animeOnly, bool smart = true, int season = 0, string providerId = null)
         {
             if (String.IsNullOrWhiteSpace(keyword)) throw new ArgumentException("请输入作品名。");
             if (keyword.Length > 200) throw new ArgumentException("搜索词过长。");
             if (season == 0 && smart) season = SmartMatching.SeasonTitle(keyword);
             var providers = Providers();
+            if (!String.IsNullOrEmpty(providerId))
+            {
+                providers = providers.Where(x => x.Id == providerId).ToList();
+                if (providers.Count == 0) throw new InvalidOperationException("所选接口已停用，请重新选择弹幕接口。");
+            }
             var tasks = providers.Select(async p =>
             {
                 try
