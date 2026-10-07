@@ -23,8 +23,12 @@ namespace DanmuCinema.Desktop
         [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
         [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern IntPtr SetActiveWindow(IntPtr window);
         public static bool IsForeground(Window window)
-        { return window.IsActive || new WindowInteropHelper(window).Handle == GetForegroundWindow(); }
+        {
+            var handle = new WindowInteropHelper(window).Handle;
+            return handle == IntPtr.Zero ? window.IsActive : handle == GetForegroundWindow();
+        }
         public static void RestoreDialogOwner(Window owner, bool foreground)
         {
             if (owner == null || !owner.IsVisible || owner.WindowState == WindowState.Minimized) return;
@@ -48,6 +52,26 @@ namespace DanmuCinema.Desktop
             // Keep the system's animation policy; only remove our window's opt-out.
             if (!SystemParameters.MinimizeAnimation) return true;
             try { int disabled = 0; return DwmSetWindowAttribute(new WindowInteropHelper(window).Handle, 3, ref disabled, sizeof(int)) == 0; } catch (DllNotFoundException) { return false; }
+        }
+        internal static bool PrepareDialogClose(Window window)
+        { return PrepareDialogClose(window, IsForeground(window)); }
+        internal static bool PrepareDialogClose(Window window, bool foreground)
+        {
+            var owner = window.Owner;
+            if (owner == null || !owner.IsVisible || owner.WindowState == WindowState.Minimized || !foreground) return false;
+            var handle = new WindowInteropHelper(owner).Handle;
+            if (handle == IntPtr.Zero || !IsWindowVisible(handle)) return false;
+            // Destruction selects Windows' last active top-level HWND. That can
+            // be another app between the owned dialog and its inactive owner.
+            // Activate the direct owner while the dialog still covers it, before
+            // WM_DESTROY/DWM can expose that intervening app for a frame.
+            // Z-order is repaired before destruction even if Windows refuses
+            // foreground activation (e.g. during an interleaved focus change).
+            bool raised = SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, 0x1 | 0x2 | 0x10 | 0x200);
+            // SetForegroundWindow can be denied; the GUI thread must still
+            // nominate its owner as active before DestroyWindow selects a fallback.
+            SetActiveWindow(handle);
+            owner.Activate(); return raised;
         }
         public static Brush Brush(string color) { var value = (SolidColorBrush)new BrushConverter().ConvertFromString(color); value.Freeze(); return value; }
         public static object Resource(string name) { return Application.Current.FindResource(name); }
@@ -165,7 +189,7 @@ namespace DanmuCinema.Desktop
             Editor.LostKeyboardFocus += (s, e) => { if (rememberTyping && !popup.IsOpen) Commit(); };
             Editor.PreviewKeyDown += (s, e) => { if (e.Key == Key.Escape) popup.IsOpen = false; if (e.Key == Key.Enter) { popup.IsOpen = false; Commit(); } if (e.Key == Key.Down && !popup.IsOpen) { OpenHistory(); e.Handled = true; } };
         }
-        public void Commit() { remember.Stop(); if (!suppressed && !disposed) SearchHistory.Add(scope, Editor.Text); }
+        public void Commit() { remember.Stop(); if (!suppressed && !disposed) { SearchHistory.Add(scope, Editor.Text); suppressed = true; } }
         public void CommitSearch() { suppressed = false; Commit(); }
         public void RestoreText(string text)
         { remember.Stop(); restoring = true; try { Editor.Text = text ?? ""; suppressed = true; } finally { restoring = false; } }

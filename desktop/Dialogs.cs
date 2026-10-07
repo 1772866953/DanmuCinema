@@ -16,6 +16,13 @@ namespace DanmuCinema.Desktop
     public class DialogWindow : Window
     {
         protected readonly Grid Body;
+        internal bool OwnerPreparedForClose { get; private set; }
+        protected override void OnClosing(CancelEventArgs e)
+        {
+            base.OnClosing(e);
+            // Run after cancellation checks while this HWND is still alive.
+            if (!e.Cancel) OwnerPreparedForClose = Ui.PrepareDialogClose(this);
+        }
         public DialogWindow(string title, double width, double height)
         {
             Title = title; Width = width; Height = height; MinWidth = 760; MinHeight = 540; WindowStartupLocation = WindowStartupLocation.CenterOwner; WindowStyle = WindowStyle.SingleBorderWindow; ResizeMode = ResizeMode.CanResize;
