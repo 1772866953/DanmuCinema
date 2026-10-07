@@ -119,7 +119,7 @@ namespace DanmuCinema.Desktop
         readonly StackPanel input;
         readonly List<Button> commands = new List<Button>();
         object[] renderedSources, renderedEpisodes;
-        bool synchronizing, closed;
+        bool synchronizing, closed, working;
         public MatchWindow(DesktopController controller, ShellWindow shell, MatchState state, bool autoSearch) : base("选择弹幕来源" + (state.Item == null ? "" : " · " + Json.Text(state.Item, "Name")), 1080, 790)
         {
             this.controller = controller; this.state = state;
@@ -165,22 +165,38 @@ namespace DanmuCinema.Desktop
         }
         Button Command(string text, Func<Task> action, bool primary = false) { var button = Ui.Button(text, async () => await Work(action), primary); commands.Add(button); return button; }
         async void SearchClicked() { await Work(Search); }
-        async Task Work(Func<Task> action) { if (controller.Busy || controller.BatchRunning || closed) return; keyword.CommitSearch(); await controller.Execute(action); }
+        async Task Work(Func<Task> action)
+        {
+            if (working || controller.Busy || controller.BatchRunning || closed) return;
+            // Read the editor at command time, including a selected history row.
+            state.Keyword = keyword.Editor.Text; keyword.CommitSearch(); working = true; Render();
+            try
+            {
+                // A history popup can be clicked while an earlier library read
+                // is finishing. Execute used to silently discard that search.
+                while (controller.Loading && !closed) await Task.Delay(25);
+                if (!closed) await controller.Execute(action);
+            }
+            finally { working = false; Render(); }
+        }
         void AddScope(string name, DanmuMatchScope scope, Button command, string hint) { scopes.Items.Add(new TabItem { Header = name, Tag = scope, Content = Ui.Stack(Ui.Row(command), Ui.Text(hint, "Note")), Padding = new Thickness(12, 8, 12, 8) }); }
         void Render()
         {
             if (closed) return;
-            bool enabled = !controller.Busy && !controller.Loading && !controller.BatchRunning;
+            // Unrelated background library/status updates do not change this
+            // dialog's enabled state or tear down its existing search results.
+            bool enabled = !working && !controller.Busy && !controller.BatchRunning;
             input.IsEnabled = sources.IsEnabled = episodes.IsEnabled = enabled; foreach (var button in commands) button.IsEnabled = enabled;
             synchronizing = true;
             try
             {
                 if (!Object.ReferenceEquals(renderedSources, state.Sources)) { sources.ItemsSource = MakeSources(); renderedSources = state.Sources; }
                 if (!Object.ReferenceEquals(renderedEpisodes, state.Episodes)) { episodes.ItemsSource = MakeEpisodes(); renderedEpisodes = state.Episodes; }
-                sources.SelectedIndex = state.SourceIndex; episodes.SelectedIndex = state.EpisodeIndex;
+                if (sources.SelectedIndex != state.SourceIndex) sources.SelectedIndex = state.SourceIndex;
+                if (episodes.SelectedIndex != state.EpisodeIndex) episodes.SelectedIndex = state.EpisodeIndex;
             }
             finally { synchronizing = false; }
-            status.Text = state.Status;
+            if (status.Text != state.Status) status.Text = state.Status;
         }
         Choice[] MakeSources()
         {
@@ -191,10 +207,10 @@ namespace DanmuCinema.Desktop
         async Task Search()
         {
             if (String.IsNullOrWhiteSpace(state.Keyword)) throw new InvalidOperationException("请输入作品名。");
-            state.Sources = state.Episodes = new object[0]; state.SourceIndex = state.EpisodeIndex = -1; state.Status = "正在联合查询在线弹幕来源…"; controller.Publish();
+            state.Status = "正在查询弹幕来源，优先读取本地缓存…"; controller.Publish();
             int season = state.Item == null ? SmartMatching.SeasonTitle(state.Keyword) : SmartMatching.Season(state.Item);
             var result = await controller.Gateway.Catalog.Search(state.Keyword.Trim(), state.AnimeOnly, state.Smart, season, String.IsNullOrEmpty(state.ServiceId) ? null : state.ServiceId);
-            state.Sources = result.Items; state.Status = "显示 " + result.Items.Length + " 个候选" + (result.HiddenCount > 0 ? "，隐藏 " + result.HiddenCount + " 个非动漫候选" : "") + "。请核对季度和集数。\n" + result.Summary; controller.Publish();
+            state.Sources = result.Items; state.Episodes = new object[0]; state.SourceIndex = state.EpisodeIndex = -1; state.Status = "显示 " + result.Items.Length + " 个候选" + (result.HiddenCount > 0 ? "，隐藏 " + result.HiddenCount + " 个非动漫候选" : "") + "。请核对季度和集数。\n" + result.Summary; controller.Publish();
             if (state.Smart && result.Items.Length > 0)
             {
                 var candidate = (Dictionary<string, object>)result.Items[0];

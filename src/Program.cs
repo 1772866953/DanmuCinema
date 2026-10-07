@@ -14,6 +14,7 @@ namespace DanmuCinema
             if (args.Contains("--self-test")) return SelfTests.Run();
             if (args.Contains("--integration-test")) return IntegrationTests.Run().GetAwaiter().GetResult();
             if (args.Contains("--wpf-test")) return Desktop.DesktopTests.Run();
+            if (args.Contains("--current-fixes-test")) return Desktop.CurrentFixTests.Run();
             bool owner;
             using (var singleton = new Mutex(true, "Local\\DanmuCinema-" + StableId(Paths.Root), out owner))
             {

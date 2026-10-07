@@ -44,7 +44,7 @@ namespace DanmuCinema.Desktop
         public static bool EnableWindowTransitions(Window window)
         {
             var source = PresentationSource.FromVisual(window) as HwndSource;
-            if (source != null) source.CompositionTarget.BackgroundColor = ((SolidColorBrush)Resource("Canvas")).Color;
+            if (source != null) NativeWindowSurface.Attach(window, source, ((SolidColorBrush)Resource("Canvas")).Color);
             // Keep the system's animation policy; only remove our window's opt-out.
             if (!SystemParameters.MinimizeAnimation) return true;
             try { int disabled = 0; return DwmSetWindowAttribute(new WindowInteropHelper(window).Handle, 3, ref disabled, sizeof(int)) == 0; } catch (DllNotFoundException) { return false; }

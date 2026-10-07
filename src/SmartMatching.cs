@@ -53,6 +53,7 @@ namespace DanmuCinema
             string text = DanmuCatalog.Chinese(title ?? "", false);
             text = Regex.Replace(text, @"\[[^\]]*\]|【[^】]*】", " ");
             text = Regex.Replace(text, @"\b(?:\d{3,4}p|BDRip|WEB[- ]?DL|BluRay|HEVC|AVC|x26[45]|H\.?26[45]|MKV|MP4)\b", " ", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"\b(?:8|10|12)[- ]?bit\b|\b(?:FLAC|AAC|DTS(?:-HD)?|TRUEHD|EAC3|AC3)\b", " ", RegexOptions.IgnoreCase);
             text = Regex.Replace(text, @"(?:S\d{1,2}E\d{1,3}|\bSeason\s*\d+|(?<![a-z])S\d{1,2}(?!\d)|第\s*[一二三四五六七八九十\d]+\s*[季期]|\b\d+(?:st|nd|rd|th)\s+season\b)", " ", RegexOptions.IgnoreCase);
             text = Regex.Replace(text, @"(?:\s+(?:II|III|IV)|\s*\(\d{1,3}\)|\s+-\s+\d{1,3}|\s+\d{1,3})\s*$", "", RegexOptions.IgnoreCase);
             return Regex.Replace(text, @"\s+", " ").Trim(' ', '-', '_', '.');
@@ -66,7 +67,9 @@ namespace DanmuCinema
         public static string[] Queries(string keyword)
         {
             string clean = CleanTitle(keyword);
-            var list = new List<string> { keyword.Trim(), clean };
+            // History often stores a release folder name. Query the actual title
+            // first, using the same official cache key as a manually typed title.
+            var list = new List<string> { clean, keyword.Trim() };
             var chinese = Regex.Match(clean, @"[\u4e00-\u9fff]{6,}");
             if (chinese.Success) list.Add(chinese.Value.Substring(0, 4));
             else { var words = clean.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries); if (words.Length > 2) list.Add(String.Join(" ", words.Take(2))); }

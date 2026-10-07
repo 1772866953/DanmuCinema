@@ -189,7 +189,7 @@ namespace DanmuCinema.Desktop
             }
             catch { ServerStatus = "服务正在启动或暂时无响应"; }
             finally { checking = false; Publish(); }
-            if (Window != null && Services.OwnsProcess && !String.IsNullOrEmpty(Services.Api.Token) && !Busy && !Loading && (Library.Entries.Length == 0 || Session.Page == "library" && (DateTime.UtcNow - lastLibraryRefresh).TotalSeconds >= 30) && (DateTime.UtcNow - lastLibraryAttempt).TotalSeconds >= 10)
+            if (Window != null && !Window.HasOpenDialogs && Services.OwnsProcess && !String.IsNullOrEmpty(Services.Api.Token) && !Busy && !Loading && (Library.Entries.Length == 0 || Session.Page == "library" && (DateTime.UtcNow - lastLibraryRefresh).TotalSeconds >= 30) && (DateTime.UtcNow - lastLibraryAttempt).TotalSeconds >= 10)
             {
                 try { await LoadLibrary(); } catch { Status = "暂时无法读取媒体库，请登录或刷新重试。"; Publish(); }
             }

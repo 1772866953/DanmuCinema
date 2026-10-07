@@ -26,6 +26,7 @@ namespace DanmuCinema.Desktop
         readonly DispatcherTimer placementTimer;
         readonly DispatcherTimer viewTimer;
         readonly List<Window> dialogs = new List<Window>();
+        public bool HasOpenDialogs { get { return dialogs.Any(x => x.IsVisible); } }
         WindowPlacement placement;
         bool ready, releasing, synchronizing, closingQueued;
         FrameworkElement page;
