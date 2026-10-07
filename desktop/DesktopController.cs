@@ -19,6 +19,8 @@ namespace DanmuCinema.Desktop
         public string Page = "overview", Filter = "", Ip = "", ScrollKey = "";
         public int Sort, Order;
         public readonly LibraryNavigation Navigation = new LibraryNavigation();
+        public readonly LibraryNavigation CacheNavigation = new LibraryNavigation();
+        public int CacheFilter;
         public readonly Dictionary<string, object> Draft = new Dictionary<string, object>();
         public readonly Dictionary<string, double> ScrollOffsets = new Dictionary<string, double>();
         public MatchState Match;

@@ -93,10 +93,10 @@ namespace DanmuCinema.Desktop
         }
         IntPtr WindowHook(IntPtr hwnd, int message, IntPtr wparam, IntPtr lparam, ref bool handled)
         {
-            if (message == 0x319 && session.Page == "library")
+            if (message == 0x319 && (session.Page == "library" || session.Page == "cache"))
             {
                 int command = (int)((lparam.ToInt64() >> 16) & 0x7ff);
-                if (command == 1 || command == 2) { NavigateHistory(command == 2); handled = true; }
+                if (command == 1 || command == 2) { NavigatePageHistory(command == 2); handled = true; return new IntPtr(1); }
             }
             return IntPtr.Zero;
         }
@@ -144,7 +144,7 @@ namespace DanmuCinema.Desktop
             RememberPlacement(); SavePlacement(); SavePageState(); releasing = true;
             viewTimer.Stop(); viewTimer.Tick -= ViewTick; placementTimer.Stop(); placementTimer.Tick -= PlacementTick;
             controller.Changed -= Render; Log.Added -= LogAdded;
-            foreach (var dialog in dialogs.ToArray()) dialog.Close(); dialogs.Clear();
+            foreach (var dialog in dialogs.AsEnumerable().Reverse().ToArray()) if (dialogs.Contains(dialog)) dialog.Close(); dialogs.Clear();
             var source = (HwndSource)PresentationSource.FromVisual(View); if (source != null) source.RemoveHook(WindowHook);
             ClearPage(); Ui.StopAnimations(View);
             Keyboard.ClearFocus(); FocusManager.SetFocusedElement(View, null);
@@ -157,10 +157,12 @@ namespace DanmuCinema.Desktop
         void KeyDown(object sender, KeyEventArgs e)
         {
             if (e.Key == Key.Escape && controller.Scheduler.Active) { controller.CancelSchedule(); e.Handled = true; }
-            else if (session.Page == "library" && (Keyboard.Modifiers & ModifierKeys.Alt) != 0 && (e.SystemKey == Key.Left || e.SystemKey == Key.Right)) { NavigateHistory(e.SystemKey == Key.Right); e.Handled = true; }
+            else if ((session.Page == "library" || session.Page == "cache") && (Keyboard.Modifiers & ModifierKeys.Alt) != 0 && (e.SystemKey == Key.Left || e.SystemKey == Key.Right)) { NavigatePageHistory(e.SystemKey == Key.Right); e.Handled = true; }
         }
         void MouseUp(object sender, MouseButtonEventArgs e)
-        { if (session.Page == "library" && (e.ChangedButton == MouseButton.XButton1 || e.ChangedButton == MouseButton.XButton2)) { NavigateHistory(e.ChangedButton == MouseButton.XButton2); e.Handled = true; } }
+        { if ((session.Page == "library" || session.Page == "cache") && (e.ChangedButton == MouseButton.XButton1 || e.ChangedButton == MouseButton.XButton2)) { NavigatePageHistory(e.ChangedButton == MouseButton.XButton2); e.Handled = true; } }
+        void NavigatePageHistory(bool forward)
+        { var cachePage = page as CachePage; if (cachePage != null) cachePage.NavigateHistory(forward); else NavigateHistory(forward); }
         public void Navigate(string key)
         {
             if (!navigation.ContainsKey(key)) key = "overview";
@@ -320,9 +322,10 @@ namespace DanmuCinema.Desktop
             if (releasing) return;
             View.Dispatcher.BeginInvoke(new Action(() => { if (releasing || logs == null) return; if (logs.Text.Length > 160000) logs.Text = logs.Text.Substring(logs.Text.Length - 80000); logs.AppendText(Environment.NewLine + line); logs.ScrollToEnd(); }), DispatcherPriority.Background);
         }
-        public void Track(Window dialog)
-        { dialog.Owner = View; dialog.ShowInTaskbar = false; dialogs.Add(dialog); dialog.Closed += (s, e) => { dialogs.Remove(dialog); if (!releasing) View.Dispatcher.BeginInvoke(new Action(() => { if (!releasing) Ui.RepaintOwner(View); })); }; dialog.Show(); }
-        public void ShowBatch() { var existing = dialogs.OfType<BatchWindow>().FirstOrDefault(); if (existing != null) { existing.Activate(); return; } if (controller.BatchPlan != null) Track(new BatchWindow(controller)); }
+        public void Track(Window dialog, Window owner = null)
+        { dialog.Owner = owner ?? dialogs.LastOrDefault(x => x.IsActive && x.IsVisible) ?? View; dialog.ShowInTaskbar = false; dialogs.Add(dialog); dialog.Closed += (s, e) => dialogs.Remove(dialog); dialog.Show(); }
+        public void ShowBatch() { ShowBatch(null); }
+        public void ShowBatch(Window owner) { var existing = dialogs.OfType<BatchWindow>().FirstOrDefault(); if (existing != null) { existing.Activate(); return; } if (controller.BatchPlan != null) Track(new BatchWindow(controller), owner); }
         void OpenMatchWindow(bool autoSearch) { Track(new MatchWindow(controller, this, session.Match, autoSearch)); }
         public void Match(Dictionary<string, object> item, DanmuMatchScope scope, Dictionary<string, object>[] selected)
         {

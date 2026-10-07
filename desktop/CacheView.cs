@@ -11,7 +11,8 @@ namespace DanmuCinema.Desktop
     {
         FrameworkElement BuildCache()
         {
-            var cachePage = new CachePage(controller.Gateway.Catalog.Cache, View);
+            var cachePage = new CachePage(controller.Gateway.Catalog.Cache, View, session.CacheNavigation, session.CacheFilter);
+            cachePage.FilterUpdated += value => session.CacheFilter = value;
             pageResources.Add(cachePage); return cachePage;
         }
     }
@@ -38,20 +39,23 @@ namespace DanmuCinema.Desktop
         readonly WrapPanel toolbar;
         ApiCacheEntry[] entries = new ApiCacheEntry[0];
         bool active = true, busy;
-        string currentAnime;
+        readonly LibraryNavigation navigation;
+        string currentAnime { get { return navigation.Current.Directory; } }
+        public event Action<int> FilterUpdated;
         readonly Button breadcrumb;
         ContextMenu activeMenu;
-        public CachePage(DandanApiCache cache, Window owner)
+        public CachePage(DandanApiCache cache, Window owner, LibraryNavigation navigation = null, int filterIndex = 0)
         {
             this.cache = cache; this.owner = owner;
+            this.navigation = navigation ?? new LibraryNavigation();
             RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition()); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             summary = Ui.Text("正在读取本地缓存…", "Note");
-            filter = Ui.Combo(new[] { "全部缓存", "文件特征", "文件识别", "弹幕", "搜索 / 作品详情" }, 0, 200);
+            filter = Ui.Combo(new[] { "全部缓存", "文件特征", "文件识别", "弹幕", "搜索 / 作品详情" }, filterIndex, 200);
             retention = Ui.Combo(CacheRetention.Labels, Array.IndexOf(CacheRetention.Months, cache.RetentionMonths), 150);
             System.Windows.Automation.AutomationProperties.SetName(filter, "缓存类型");
             System.Windows.Automation.AutomationProperties.SetName(retention, "统一缓存有效期");
             listing = new DataGrid { IsReadOnly = true, SelectionMode = DataGridSelectionMode.Extended };
-            breadcrumb = Ui.Button("缓存文件夹", () => { currentAnime = null; ApplyFilter(); });
+            breadcrumb = Ui.Button("缓存文件夹", () => OpenAnime(null));
             breadcrumb.HorizontalAlignment = HorizontalAlignment.Left; breadcrumb.Padding = new Thickness(12, 6, 12, 6); breadcrumb.MinHeight = 30;
             listing.MouseDoubleClick += (s, e) => { var visual = Ui.Ancestor<DataGridRow>(e.OriginalSource as DependencyObject); var row = visual == null ? null : visual.Item as CacheRow; if (row != null && row.Folder) OpenAnime(row.Anime); };
             listing.ContextMenu = new ContextMenu();
@@ -76,7 +80,12 @@ namespace DanmuCinema.Desktop
             filter.SelectionChanged += FilterChanged; Loaded += InitialLoad;
         }
         async void InitialLoad(object sender, RoutedEventArgs e) { Loaded -= InitialLoad; await Refresh(null); }
-        internal void OpenAnime(string anime) { currentAnime = anime; ApplyFilter(); }
+        internal void OpenAnime(string anime) { if (!active || busy) return; navigation.Visit(anime, ""); ApplyFilter(); }
+        internal void NavigateHistory(bool forward)
+        {
+            if (!active || busy) return;
+            if (forward ? navigation.Forward() : navigation.Back()) ApplyFilter();
+        }
         internal ContextMenu CreateContextMenu(CacheRow row)
         {
             if (activeMenu != null) { activeMenu.IsOpen = false; activeMenu.Items.Clear(); activeMenu.PlacementTarget = null; }
@@ -84,13 +93,15 @@ namespace DanmuCinema.Desktop
             var remove = new MenuItem { Header = row.Folder ? "删除这个动漫的全部缓存" : "删除缓存", Style = (Style)Ui.Resource("MediaMenuItem") };
             remove.Click += async (sender, args) => { var keys = row.Members.Select(x => x.Key).ToArray(); await Refresh(() => { if (row.Folder) cache.RemoveAnime(row.Anime); else cache.Remove(keys); }); }; menu.Items.Add(remove); activeMenu = menu; return menu;
         }
-        void FilterChanged(object sender, SelectionChangedEventArgs e) { ApplyFilter(); }
+        void FilterChanged(object sender, SelectionChangedEventArgs e) { ApplyFilter(); if (FilterUpdated != null) FilterUpdated(filter.SelectedIndex); }
         void ApplyFilter()
         {
             var shown = entries.Where(x => filter.SelectedIndex == 0 || x.TypeLabel == (string)filter.SelectedItem).ToArray();
-            if (currentAnime != null && !entries.Any(x => x.Anime == currentAnime)) currentAnime = null;
-            listing.ItemsSource = currentAnime == null ? shown.GroupBy(x => x.Anime).OrderBy(x => x.Key, NaturalNames.Instance).Select(x => new CacheRow { Folder = true, Anime = x.Key, Members = x.ToArray() }).ToArray() : shown.Where(x => x.Anime == currentAnime).Select(x => new CacheRow { Anime = x.Anime, Members = new[] { x } }).ToArray();
-            breadcrumb.Content = currentAnime == null ? "缓存文件夹" : "缓存文件夹 / " + currentAnime;
+            // A deleted history destination displays the root without creating a
+            // new history visit, so back/forward never becomes stuck in a loop.
+            bool root = currentAnime == null || !entries.Any(x => x.Anime == currentAnime);
+            listing.ItemsSource = root ? shown.GroupBy(x => x.Anime).OrderBy(x => x.Key, NaturalNames.Instance).Select(x => new CacheRow { Folder = true, Anime = x.Key, Members = x.ToArray() }).ToArray() : shown.Where(x => x.Anime == currentAnime).Select(x => new CacheRow { Anime = x.Anime, Members = new[] { x } }).ToArray();
+            breadcrumb.Content = root ? "缓存文件夹" : "缓存文件夹 / " + currentAnime;
         }
         async Task Refresh(Action change)
         {
@@ -110,6 +121,7 @@ namespace DanmuCinema.Desktop
         public void Dispose()
         {
             active = false; owner = null; Loaded -= InitialLoad; filter.SelectionChanged -= FilterChanged;
+            FilterUpdated = null;
             if (activeMenu != null) { activeMenu.IsOpen = false; activeMenu.Items.Clear(); activeMenu.PlacementTarget = null; activeMenu = null; }
             entries = new ApiCacheEntry[0]; listing.ItemsSource = null; Children.Clear();
         }

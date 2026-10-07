@@ -468,13 +468,30 @@ namespace DanmuCinema
                     if (fields.Length < 3 || !Double.TryParse(fields[0], NumberStyles.Float, CultureInfo.InvariantCulture, out time)) continue;
                     mode = fields[1]; color = fields[2]; text = First(row, "M", "Text");
                 }
+                text = CleanXmlText(text);
                 int parsedMode, parsedColor;
                 if (Double.IsNaN(time) || Double.IsInfinity(time) || time < 0 || !Int32.TryParse(mode, out parsedMode) || parsedMode < 1 || parsedMode > 6 || !Int32.TryParse(color, out parsedColor) || parsedColor < 0 || parsedColor > 16777215 || String.IsNullOrWhiteSpace(text)) continue;
                 var d = xml.CreateElement("d");
                 d.SetAttribute("p", time.ToString("0.###", CultureInfo.InvariantCulture) + "," + parsedMode + ",25," + parsedColor + ",0,0," + source + "," + Regex.Replace(id, "[^a-zA-Z0-9_-]", ""));
                 d.InnerText = text; xml.DocumentElement.AppendChild(d);
             }
-            return xml.OuterXml;
+            var output = new StringBuilder();
+            using (var writer = XmlWriter.Create(output, new XmlWriterSettings { OmitXmlDeclaration = true, NewLineHandling = NewLineHandling.Entitize })) xml.WriteTo(writer);
+            return output.ToString();
+        }
+        // Remote JSON can contain XML 1.0 control characters or broken UTF-16.
+        // Keep valid surrogate pairs (emoji), CJK, tabs and line breaks intact.
+        static string CleanXmlText(string value)
+        {
+            if (String.IsNullOrEmpty(value)) return value;
+            var clean = new StringBuilder(value.Length);
+            for (int i = 0; i < value.Length; i++)
+            {
+                char c = value[i];
+                if (Char.IsHighSurrogate(c) && i + 1 < value.Length && Char.IsLowSurrogate(value[i + 1])) { clean.Append(c); clean.Append(value[++i]); }
+                else if (!Char.IsSurrogate(c) && XmlConvert.IsXmlChar(c)) clean.Append(c);
+            }
+            return clean.ToString();
         }
         public static XmlDocument ParseXml(string content)
         {

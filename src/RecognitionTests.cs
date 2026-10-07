@@ -38,7 +38,7 @@ namespace DanmuCinema
                 return Reply("{\"success\":true,\"bangumi\":{\"episodes\":[{\"episodeId\":101,\"episodeNumber\":3,\"episodeTitle\":\"第3话\"}]}}");
             }
             static string Candidate(int id, string title) { return "{\"animeId\":10,\"episodeId\":" + id + ",\"animeTitle\":\"" + title + "\",\"episodeTitle\":\"第3话 测试标题\",\"typeDescription\":\"动漫\",\"shift\":2}"; }
-            string CommentsJson() { return Empty ? "{\"comments\":[]}" : "{\"count\":1,\"comments\":[{\"cid\":1,\"p\":\"1,1,16777215,0\",\"m\":\"测试弹幕\"}]}"; }
+            string CommentsJson() { return Empty ? "{\"comments\":[]}" : "{\"count\":1,\"comments\":[{\"cid\":1,\"p\":\"1,1,16777215,0\",\"m\":\"测试\\u0000弹幕\\u0001\"}]}"; }
             static HttpResponseMessage Reply(string text) { return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(text) }; }
         }
         sealed class PlayingFixture : HttpMessageHandler
@@ -79,8 +79,12 @@ namespace DanmuCinema
                 using (var restarted = new DanmuCatalog(settings, api, new Fixture { Offline = true })) SelfTests.Assert((await restarted.IdentifyFile(local, CancellationToken.None)).HashMatched, "重启后离线可恢复 hash 与节目编号的缓存关联", report);
                 handler.Redirect = true;
                 string comments = await catalog.Download(result.Recommended);
+                SelfTests.Assert(DanmuCatalog.ParseXml(comments).GetElementsByTagName("d")[0].InnerText == "测试弹幕", "官方及加速响应含空字符时清理正文，下载与偏移仍可生成有效 XML", report);
                 SelfTests.Assert(handler.Comments == 1 && !handler.RedirectHasCredentials && comments.Contains("3,1,25,16777215") && comments.Contains("测试弹幕"), "官方弹幕加速跳转不发送凭证，识别偏移正确应用", report);
-                int before = handler.Requests; await catalog.Download(result.Recommended);
+                int before = handler.Requests;
+                using (var restarted = new DanmuCatalog(settings, api, new Fixture { Offline = true }))
+                    SelfTests.Assert(DanmuCatalog.ParseXml(await restarted.Download(result.Recommended)).GetElementsByTagName("d")[0].InnerText == "测试弹幕", "重启离线读取已有异常正文缓存仍可下载，不需清缓存或重新请求", report);
+                await catalog.Download(result.Recommended);
                 SelfTests.Assert(handler.Requests == before, "再次下载从缓存生成 XML，不重复请求官方或加速服务", report);
                 SelfTests.Assert(!DanmuCatalog.AllowedCommentRedirect(new Uri("https://dandanplay.net.evil.test/")) && !DanmuCatalog.AllowedCommentRedirect(new Uri("http://127.0.0.1/")), "弹幕跳转限制官方域名与 HTTPS", report);
                 var auto = new AutomaticDanmu(settings, api, catalog, () => true);

@@ -78,6 +78,16 @@ namespace DanmuCinema
             var animekoRows = Json.Array(Json.Object("{\"rows\":[{\"id\":\"test\",\"danmakuInfo\":{\"playTime\":1250,\"location\":\"BOTTOM\",\"color\":-1,\"text\":\"测试\"}}]}"), "Rows");
             var bahamutRows = Json.Array(Json.Object("{\"rows\":[{\"sn\":1,\"time\":25,\"position\":1,\"color\":\"#FF0000\",\"text\":\"测试\"}]}"), "Rows");
             SelfTests.Assert(DanmuCatalog.CommentsToXml(animekoRows, "animeko").Contains("1.25,4,25,16777215") && DanmuCatalog.CommentsToXml(bahamutRows, "bahamut").Contains("2.5,5,25,16711680"), "两个动漫源的时间单位、位置和颜色转换", report);
+            string emoji = Char.ConvertFromUtf32(0x1F60A), valid = "中文<&\t\n\r" + emoji;
+            string dirty = "\0\u0001\u000B\uFFFE\uFFFF\uD800" + valid + "\uDC00";
+            foreach (var source in new[] { "dandan", "animeko", "bahamut" })
+            {
+                var comment = new Dictionary<string, object> { { "Id", "id\0<&" }, { "P", "1,1,16777215,user" }, { "M", dirty }, { "Time", 10 }, { "Text", dirty }, { "DanmakuInfo", new Dictionary<string, object> { { "PlayTime", 1000 }, { "Text", dirty } } } };
+                string content = DanmuCatalog.CommentsToXml(new object[] { comment }, source);
+                SelfTests.Assert(DanmuCatalog.ParseXml(content).GetElementsByTagName("d")[0].InnerText == valid, "清理非法 XML 字符同时保留中文、转义、换行和 emoji：" + source, report);
+                comment["M"] = comment["Text"] = "\0\u0001"; ((Dictionary<string, object>)comment["DanmakuInfo"])["Text"] = "\0\u0001";
+                SelfTests.Assert(DanmuCatalog.ParseXml(DanmuCatalog.CommentsToXml(new object[] { comment }, source)).GetElementsByTagName("d").Count == 0, "仅含非法字符的空弹幕不写入文件：" + source, report);
+            }
             rejected = false; try { DanmuCatalog.ParseXml("<!DOCTYPE i [<!ENTITY x SYSTEM 'file:///C:/secret'>]><i>&x;</i>"); } catch (System.Xml.XmlException) { rejected = true; }
             SelfTests.Assert(rejected, "弹幕 XML 拒绝外部实体", report);
             string unordered = "<i><chatserver>fixture</chatserver><d p=\"10,1,25,16777215,0,0,u,3\">晚</d><d p=\"2.5,5,25,255,0,0,u,1\" custom=\"keep\">早&lt;&amp;</d><d p=\"2.5,4,25,255,0,0,u,2\">同秒</d></i>";

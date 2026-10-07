@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -21,6 +22,8 @@ namespace DanmuCinema.Desktop
     {
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
         [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+        [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wparam, IntPtr lparam);
         public static int Run()
         {
             // All settings, geometry, histories and screenshots stay in a disposable fixture.
@@ -171,6 +174,15 @@ namespace DanmuCinema.Desktop
             var remote = new Dictionary<string, object> { { "Number", "2" }, { "Title", "第 2 集" }, { "Provider", "fixture" }, { "Site", "测试源" }, { "Id", "test-2" } };
             controller.Session.Match = new MatchState { Item = local, Selected = new[] { local, local }, Keyword = "测试番剧", Sources = new object[] { new Dictionary<string, object> { { "Name", "测试番剧" }, { "Year", "2026" }, { "Site", "测试源" } } }, Episodes = new object[] { remote }, SourceIndex = 0, EpisodeIndex = 0 };
             var match = new MatchWindow(controller, controller.Window, controller.Session.Match, false); controller.Window.Track(match); Settle(); Capture(match, Path.Combine(output, "wpf-match.png"));
+            var lists = Descendants<ListBox>(match).ToArray();
+            for (int i = 0; i < 6; i++)
+            {
+                match.IsEnabled = i % 2 == 0; foreach (var list in lists) list.IsEnabled = i % 3 == 0; Pump();
+                Assert(lists.All(DarkEmptyBackground), "匹配列表禁用/启用与父窗口状态变化时无白色背景：" + i, report);
+            }
+            match.IsEnabled = true; foreach (var list in lists) list.IsEnabled = true;
+            for (int i = 0; i < 3; i++) { controller.Publish(); Settle(); Assert(lists.All(DarkEmptyBackground), "空闲状态重复刷新保持深色列表：" + i, report); }
+            Capture(match, Path.Combine(output, "wpf-match-dark.png"));
             var text = Descendants<TextBlock>(match).Select(x => x.Text).ToArray();
             Assert(text.Any(x => x.Contains("测试源")) && text.Any(x => x.Contains("第 2 集")), "匹配弹窗真实绑定显示作品来源和集数", report);
             Assert(Descendants<TabControl>(match).Single().Items.Count == 3, "匹配弹窗提供单集、整季、已选影片三个页签", report);
@@ -203,9 +215,39 @@ namespace DanmuCinema.Desktop
                     { other.Show(); other.Activate(); Pump(); controller.Window.View.Activate(); child.Activate(); Pump(); child.Close(); Pump(); }
                     Assert(controller.Window != null && controller.Window.View.IsVisible && IsWindowVisible(new WindowInteropHelper(controller.Window.View).Handle), "切换其他窗口后关闭子窗口保留主窗口：" + state + " " + i, report);
                 }
+                var first = new MatchWindow(controller, controller.Window, controller.Session.Match, false); controller.Window.Track(first, controller.Window.View); Pump();
+                controller.Window.ShowBatch(first); Pump(); var second = Application.Current.Windows.OfType<BatchWindow>().Single();
+                Assert(second.Owner == first && first.Owner == controller.Window.View, "整季下载弹窗使用真实二级父子关系：" + state, report);
+                int mainClosing = 0; CancelEventHandler closing = (s, e) => mainClosing++; controller.Window.View.Closing += closing;
+                using (var other = new System.Windows.Forms.Form { Text = "Nested activation fixture", Width = 180, Height = 100 })
+                {
+                    other.Show(); other.Activate(); Pump(); first.Activate(); second.Activate(); Pump();
+                    var alert = new AlertWindow("隔离提示测试", "下载状态提示", false) { Owner = second };
+                    alert.Loaded += (s, e) => alert.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        Assert(Descendants<ListBox>(first).All(DarkEmptyBackground) && DarkEmptyBackground(Descendants<DataGrid>(second).Single()), "三级模态提示禁用父窗口时列表与下载表格保持深色：" + state, report);
+                        alert.Close();
+                    }));
+                    alert.ShowDialog(); Pump(); Assert(second.IsActive, "关闭三级模态提示后焦点回到整季窗口：" + state, report);
+                    Descendants<Button>(second).Single(x => (x.Tag as string) == "close").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Pump();
+                    Assert(first.IsActive && GetForegroundWindow() == new WindowInteropHelper(first).Handle && controller.Window.View.IsVisible, "切换应用后二级关闭返回一级弹窗：" + state, report);
+                    Descendants<Button>(first).Single(x => (x.Tag as string) == "close").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Pump();
+                    Assert(controller.Window != null && controller.Window.View.IsActive && IsWindowVisible(new WindowInteropHelper(controller.Window.View).Handle) && GetForegroundWindow() == new WindowInteropHelper(controller.Window.View).Handle && mainClosing == 0, "继续关闭一级弹窗主窗口保持前台且未触发托盘关闭：" + state, report);
+                    var background = new SourcesWindow(controller); controller.Window.Track(background); Pump(); other.Activate(); Pump(); background.Close(); Pump();
+                    Assert(GetForegroundWindow() == other.Handle, "后台关闭弹窗不抢占其他应用焦点：" + state, report);
+                }
+                controller.Window.View.Closing -= closing;
             }
             controller.Window.View.WindowState = WindowState.Normal;
             controller.Window.View.Width = 1080; controller.Window.View.Height = 750;
+        }
+        static bool DarkEmptyBackground(FrameworkElement element)
+        {
+            var bitmap = new RenderTargetBitmap((int)Math.Ceiling(element.ActualWidth), (int)Math.Ceiling(element.ActualHeight), 96, 96, PixelFormats.Pbgra32); bitmap.Render(element);
+            var pixels = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4]; bitmap.CopyPixels(pixels, bitmap.PixelWidth * 4, 0);
+            // Bottom blank area, away from text, selection, rounded border and scrollbar.
+            int p = ((bitmap.PixelHeight - 22) * bitmap.PixelWidth + bitmap.PixelWidth / 2) * 4;
+            return pixels[p + 3] == 255 && pixels[p] < 130 && pixels[p + 1] < 130 && pixels[p + 2] < 130;
         }
         sealed class SeasonFixture : HttpMessageHandler
         {
@@ -215,6 +257,7 @@ namespace DanmuCinema.Desktop
                 await Task.Delay(10, token); string content;
                 if (request.RequestUri.AbsolutePath.EndsWith("match")) { Matches++; content = "{\"success\":true,\"isMatched\":true,\"matches\":[{\"animeId\":10,\"episodeId\":101,\"animeTitle\":\"测试番剧 第三季\",\"episodeTitle\":\"第1话\"}]}"; }
                 else if (request.RequestUri.AbsolutePath.Contains("bangumi")) { Details++; content = Json.Write(new { success = true, bangumi = new { animeTitle = "测试番剧 第三季", episodes = Enumerable.Range(1, 12).Select(i => new { episodeId = 100 + i, episodeNumber = i, episodeTitle = "第" + i + "话" }).ToArray() } }); }
+                else if (request.RequestUri.AbsolutePath.Contains("comment")) content = "{\"comments\":[{\"p\":\"1,1,16777215,u\",\"m\":\"测试\\u0000弹幕\"}]}";
                 else content = "{\"success\":true,\"animes\":[{\"animeId\":10,\"animeTitle\":\"测试番剧 第三季\",\"typeDescription\":\"动漫\"}]}";
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(content) };
             }
@@ -245,7 +288,11 @@ namespace DanmuCinema.Desktop
                 var previousPlan = test.BatchPlan;
                 Descendants<Button>(match).Single(x => (x.Content as string) == "预览已选影片并下载").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); WaitIdle(test);
                 Assert(!Object.ReferenceEquals(previousPlan, test.BatchPlan) && Object.ReferenceEquals(((BatchRow)grid.Items[0]).Entry, test.BatchPlan[0]) && grid.Items.Count == 12, "重复预览复用弹窗时绑定最新匹配计划，避免下载旧来源", report);
-                batch.Close(); match.Close(); Pump();
+                Descendants<Button>(batch).Single(x => (x.Content as string) == "开始全部下载").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+                int waits = 0; while (test.BatchRunning && waits++ < 40) Settle(); Pump();
+                Assert(!test.BatchRunning && files.All(x => File.Exists(Path.ChangeExtension(Json.Text(x, "Path"), ".xml"))) && test.BatchPlan.All(x => x.Status.StartsWith("已保存")), "真实整季下载12个合成视频，含空字符弹幕不导致单集失败", report);
+                batch.Activate(); Pump(); batch.Close(); Pump(); match.Close(); Pump();
+                Assert(test.Window != null && test.Window.View.IsVisible && test.Window.View.IsActive, "实际整季下载完成逐层关闭后主窗口仍在前台", report);
                 test.Window.Match(null, DanmuMatchScope.Single, new Dictionary<string, object>[0]); Pump(); match = app.Windows.OfType<MatchWindow>().Single();
                 Assert((DanmuMatchScope)((TabItem)Descendants<TabControl>(match).Single().SelectedItem).Tag == DanmuMatchScope.Season, "未选影片也可直接打开整季搜索匹配", report);
                 var target = Descendants<ComboBox>(match).Single(x => x.Items.Count > 0 && x.Items[0] is Choice && ((Choice)x.Items[0]).Label.Contains("season-fixture"));
@@ -289,6 +336,7 @@ namespace DanmuCinema.Desktop
             var retention = Descendants<ComboBox>(view).Single(x => System.Windows.Automation.AutomationProperties.GetName(x) == "统一缓存有效期");
             Assert(retention.Items.Count == 5 && retention.SelectedIndex == 1, "统一缓存有效期提供五个选项并默认三个月", report);
             Assert(grid.Items.Count == 2 && grid.Items.Cast<CacheRow>().All(x => x.Folder) && grid.Items.Cast<CacheRow>().Sum(x => x.Members.Length) == 3, "缓存页按动漫文件夹展示全部条目", report);
+            view.IsEnabled = false; Pump(); Assert(DarkEmptyBackground(grid), "缓存表格禁用时保持深色背景", report); view.IsEnabled = true;
             Capture(controller.Window.View, Path.Combine(output, "wpf-cache.png"));
             filter.SelectedIndex = 3; Pump(); Assert(grid.Items.Count == 1, "缓存页按弹幕类型筛选", report);
             grid.SelectedIndex = 0; Descendants<Button>(view).Single(x => (x.Content as string) == "删除选中").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle();
@@ -309,6 +357,18 @@ namespace DanmuCinema.Desktop
             cache.Write(DandanApiCache.Key("context-other"), "comment", "第1集", "fixture", "另一个动漫");
             Descendants<Button>(view).Single(x => (x.Content as string) == "刷新").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle();
             view.OpenAnime("右键测试动漫"); Pump(); Assert(grid.Items.Count == 2 && grid.Items.Cast<CacheRow>().All(x => !x.Folder), "进入动漫缓存文件夹显示所属条目", report);
+            SideButton(controller.Window.View, false); Assert(grid.Items.Cast<CacheRow>().All(x => x.Folder), "缓存页鼠标侧键后退返回根文件夹", report);
+            SideButton(controller.Window.View, true); Assert(grid.Items.Count == 2 && grid.Items.Cast<CacheRow>().All(x => !x.Folder), "缓存页鼠标侧键前进恢复动漫内容", report);
+            var handle = new WindowInteropHelper(controller.Window.View).Handle;
+            SendMessage(handle, 0x319, handle, new IntPtr(1 << 16)); Pump(); Assert(grid.Items.Cast<CacheRow>().All(x => x.Folder), "缓存页支持鼠标驱动原生后退命令", report);
+            SendMessage(handle, 0x319, handle, new IntPtr(2 << 16)); Pump(); Assert(grid.Items.Count == 2 && grid.Items.Cast<CacheRow>().All(x => !x.Folder), "缓存页支持鼠标驱动原生前进命令", report);
+            controller.Window.Navigate("overview"); controller.Window.Navigate("cache"); Settle();
+            view = Descendants<CachePage>(controller.Window.View).Single(); grid = Descendants<DataGrid>(view).Single(); filter = Descendants<ComboBox>(view).Single(x => System.Windows.Automation.AutomationProperties.GetName(x) == "缓存类型");
+            clear = Descendants<Button>(view).Single(x => (x.Content as string) == "清空全部缓存");
+            Assert(grid.Items.Count == 2 && grid.Items.Cast<CacheRow>().All(x => !x.Folder), "切页后保留缓存所在目录及导航历史", report);
+            SideButton(controller.Window.View, false); view.OpenAnime("另一个动漫"); SideButton(controller.Window.View, true);
+            Assert(grid.Items.Count == 1 && ((CacheRow)grid.Items[0]).Anime == "另一个动漫" && !controller.Session.CacheNavigation.CanForward, "访问新缓存目录丢弃旧前进分支", report);
+            view.OpenAnime("右键测试动漫");
             var context = view.CreateContextMenu((CacheRow)grid.Items[0]); ((MenuItem)context.Items[0]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); Settle();
             Assert(grid.Items.Count == 1 && cache.Entries().Length == 2, "缓存条目右键删除只移除该条，保留同动漫其他缓存", report);
             cache.Write(DandanApiCache.Key("context-hidden"), "hash", "文件特征", "fixture", "右键测试动漫");
@@ -319,6 +379,12 @@ namespace DanmuCinema.Desktop
             controller.Window.Navigate("overview"); Pump(); Assert(view.Children.Count == 0 && grid.ItemsSource == null, "切页释放缓存控件和条目引用", report);
             Assert(context.Items.Count == 0 && context.PlacementTarget == null, "切页解除缓存右键菜单及其控件引用", report);
             controller.Window.View.Width = 1200; controller.Window.View.Height = 820;
+        }
+        static void SideButton(Window window, bool forward)
+        {
+            var args = new System.Windows.Input.MouseButtonEventArgs(System.Windows.Input.Mouse.PrimaryDevice, 0, forward ? System.Windows.Input.MouseButton.XButton2 : System.Windows.Input.MouseButton.XButton1) { RoutedEvent = System.Windows.Input.Mouse.PreviewMouseUpEvent };
+            window.RaiseEvent(args); Pump();
+            if (!args.Handled) throw new Exception("侧键导航未处理");
         }
         static void TestDeletionControls(DesktopController controller, List<string> report, string output)
         {

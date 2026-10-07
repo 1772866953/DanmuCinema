@@ -31,7 +31,16 @@ namespace DanmuCinema.Desktop
             Content = new Border { Child = outer, BorderBrush = (Brush)Ui.Resource("Line"), BorderThickness = new Thickness(1) };
             SourceInitialized += (s, e) => Ui.EnableWindowTransitions(this);
             Loaded += (s, e) => { if (Owner != null) Icon = Owner.Icon; Ui.Animate(Body); Ui.AnimateAccent(accent); };
-            Closed += (s, e) => { Ui.StopAnimations(Body); Body.Children.Clear(); Content = null; };
+            Window parent = null; bool returnFocus = false;
+            Closing += (s, e) => { parent = Owner; returnFocus = Ui.IsForeground(this); };
+            Closed += (s, e) =>
+            {
+                Ui.StopAnimations(Body); Body.Children.Clear(); Content = null;
+                // Wait for native destruction/owned-window activation to unwind.
+                // Capture the direct parent before WPF detaches ownership.
+                Window target = parent; bool activate = returnFocus; parent = null;
+                Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Input, new Action(() => Ui.RestoreDialogOwner(target, activate)));
+            };
         }
     }
     public sealed class AlertWindow : DialogWindow
@@ -56,7 +65,7 @@ namespace DanmuCinema.Desktop
             // Keep validation above the active child dialog, and tie its lifetime to it.
             var active = Application.Current.Windows.OfType<Window>().LastOrDefault(x => x.IsActive && x.IsVisible);
             var dialog = new AlertWindow(title, message, confirm, acceptLabel, cancelLabel); dialog.Owner = active ?? owner;
-            bool accepted = dialog.ShowDialog() == true; Ui.RepaintOwner(dialog.Owner); return accepted;
+            return dialog.ShowDialog() == true;
         }
     }
     public sealed class SourcesWindow : DialogWindow
@@ -243,7 +252,7 @@ namespace DanmuCinema.Desktop
             var local = selectedOnly ? state.Selected : controller.Library.Entries.Select(x => x.Item).Where(x => SmartMatching.SameSeason(state.Item, x)).ToArray();
             var plan = BatchMatching.Plan(local, state.Episodes.Cast<Dictionary<string, object>>()); if (plan.Count == 0) throw new InvalidOperationException("没有找到同季本地视频。");
             controller.BatchPlan = plan; controller.BatchKeep = false; controller.BatchTitle = (selectedOnly ? "已选影片 · " : "整季 · ") + Json.Text(source, "Name") + " · " + Json.Text(source, "Site"); controller.BatchStatus = "可匹配 " + plan.Count(x => x.Selected) + " 集，共 " + plan.Count + " 个本地文件。";
-            if (controller.Window != null) controller.Window.ShowBatch();
+            if (controller.Window != null) controller.Window.ShowBatch(this);
         }
     }
     public sealed class BatchRow : INotifyPropertyChanged
