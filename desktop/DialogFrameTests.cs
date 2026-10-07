@@ -33,6 +33,122 @@ namespace DanmuCinema.Desktop
         [DllImport("user32.dll")] static extern IntPtr SetActiveWindow(IntPtr hwnd);
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
         static readonly List<string> report = new List<string>();
+        public static int RunCloseTransitions()
+        {
+            string original = Paths.Root, output = Path.Combine(original, "tests", "output", "dialog-close-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+            Directory.CreateDirectory(output); Paths.Root = output;
+            File.WriteAllText(Path.Combine(original, "tests", "output", "dialog-close-latest.txt"), output);
+            System.Windows.Forms.WindowsFormsSynchronizationContext.AutoInstall = false;
+            var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown }; DesktopController controller = null;
+            try
+            {
+                Ui.InstallTheme(app); SynchronizationContext.SetSynchronizationContext(new DispatcherSynchronizationContext());
+                controller = new DesktopController(app, new AppSettings { EnableDandan = false, EnableAnimeko = false, EnableBahamut = false, EnableExistingDanmu = false }, false);
+                controller.ShowWindow(); var main = controller.Window.View;
+                var shellContent = main.Content;
+                main.Topmost = true; main.Content = new Border { Background = Ui.Brush("#132337") };
+                ShowWindow(new WindowInteropHelper(main).Handle, 5);
+                foreach (var state in new[] { WindowState.Normal, WindowState.Maximized })
+                {
+                    main.WindowState = state; Pause(300);
+                    for (int repeat = 0; repeat < 2; repeat++)
+                    {
+                        NativeRect bounds; GetWindowRect(new WindowInteropHelper(main).Handle, out bounds);
+                        var scale = ((HwndSource)PresentationSource.FromVisual(main)).CompositionTarget.TransformFromDevice;
+                        double left = (bounds.Left + 130) * scale.M11, top = (bounds.Top + 100) * scale.M22;
+                        var parent = new ColorCloseDialog("一级关闭过渡测试", "#214965") { Owner = main, Left = left, Top = top };
+                        parent.Show();
+                        var child = new ColorCloseDialog("二级关闭过渡测试", "#278067") { Owner = parent, Left = left, Top = top };
+                        child.Show(); ShowWindow(new WindowInteropHelper(parent).Handle, 5); ShowWindow(new WindowInteropHelper(child).Handle, 5);
+                        SetActiveWindow(new WindowInteropHelper(child).Handle); Pause(400);
+                        System.ComponentModel.CancelEventHandler cancel = (s, e) => e.Cancel = true;
+                        child.Closing += cancel; CloseCaption(child);
+                        Check(child.IsVisible && !child.CloseTransitionSuppressed, "取消关闭保留弹窗和正常动画：" + state + " " + repeat);
+                        child.Closing -= cancel;
+                        GetWindowRect(new WindowInteropHelper(parent).Handle, out bounds);
+                        var crop = new Rectangle((bounds.Left + bounds.Right) / 2 - 160, (bounds.Top + bounds.Bottom) / 2 - 90, 320, 180);
+                        using (var recording = new Recording(crop))
+                        {
+                            recording.Start(); Pause(150); recording.Mark("close child");
+                            CloseWithoutExitAnimation(child); Pause(250);
+                            recording.Mark("close parent"); CloseWithoutExitAnimation(parent); Pause(350);
+                            recording.Stop(); string name = state + "-" + repeat; recording.Save(Path.Combine(output, name));
+                            Check(recording.Frames.Count >= 35, "关闭过程连续录帧：" + name + " " + recording.Frames.Count);
+                            int phase = 0; bool sawChild = false, sawParent = false, sawMain = false;
+                            foreach (var frame in recording.Frames)
+                            {
+                                var pixel = frame.Image.GetPixel(frame.Image.Width / 2, frame.Image.Height / 2);
+                                int observed = Near(pixel, 0x27, 0x80, 0x67) ? 0 : Near(pixel, 0x21, 0x49, 0x65) ? 1 : Near(pixel, 0x13, 0x23, 0x37) ? 2 : -1;
+                                CheckFrame(observed >= 0, name + " 出现中间混合/闪烁帧 " + frame.Ms.ToString("F1") + "ms " + pixel);
+                                CheckFrame(observed >= phase, name + " 已退出的弹窗画面再次出现 " + frame.Ms.ToString("F1") + "ms");
+                                phase = observed; sawChild |= observed == 0; sawParent |= observed == 1; sawMain |= observed == 2;
+                            }
+                            Check(sawChild && sawParent && sawMain, "画面依次从二级→一级→主窗口，无中间混合帧或反复闪回：" + name);
+                        }
+                        Check(parent.CloseTransitionSuppressed && child.CloseTransitionSuppressed && main.IsVisible && IsWindowVisible(new WindowInteropHelper(main).Handle), "仅关闭的弹窗停用退出过渡，主窗口仍可见：" + state + " " + repeat);
+                        Check(Ui.EnableWindowTransitions(main), "主窗口的正常系统动画仍可启用：" + state + " " + repeat);
+                    }
+                }
+                main.Content = shellContent;
+                TestRealCloseTransitions(controller, app, output);
+                report.Add("PASS: " + report.Count(x => x.StartsWith("PASS ")) + " close-transition checks"); return 0;
+            }
+            catch (Exception error) { report.Add("FAIL: " + error); return 1; }
+            finally
+            {
+                if (controller != null) { controller.ReleaseWindow(); controller.Dispose(); }
+                app.Shutdown(); Paths.Root = original; File.WriteAllLines(Path.Combine(output, "report.txt"), report);
+            }
+        }
+        static void TestRealCloseTransitions(DesktopController controller, Application app, string output)
+        {
+            var items = Enumerable.Range(1, 12).Select(i => new Dictionary<string, object> { { "Id", "fixture-" + i }, { "Name", "关闭过渡测试 第 " + i + " 集" }, { "Path", Path.Combine(output, "videos", "关闭过渡测试", "episode-" + i.ToString("D2") + ".mkv") }, { "Type", "Episode" }, { "SeriesName", "关闭过渡测试" }, { "ParentIndexNumber", 1 }, { "IndexNumber", i } }).ToArray();
+            controller.Library.Replace(items); controller.Window.Navigate("library"); controller.Publish();
+            foreach (var state in new[] { WindowState.Normal, WindowState.Maximized })
+            {
+                var main = controller.Window.View; main.WindowState = state; Pause(350);
+                var episodes = Enumerable.Range(1, 12).Select(i => (object)new Dictionary<string, object> { { "Id", "fixture-remote-" + i }, { "Number", i.ToString() }, { "Title", "第 " + i + " 集" }, { "Provider", "fixture" }, { "Site", "离线测试源" } }).ToArray();
+                var matchState = new MatchState { Item = items[0], Selected = items, Scope = DanmuMatchScope.Selection, Keyword = "关闭过渡测试", Sources = new object[] { new Dictionary<string, object> { { "Name", "关闭过渡测试" }, { "Site", "离线测试源" } } }, Episodes = episodes, SourceIndex = 0, EpisodeIndex = 0 };
+                var match = new MatchWindow(controller, controller.Window, matchState, false) { Topmost = true }; controller.Window.Track(match, main); Pause(250);
+                Children<Button>(match).Single(x => (x.Content as string) == "预览已选影片并下载").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Pause(350);
+                var batch = app.Windows.OfType<BatchWindow>().Single(); batch.Topmost = true; batch.Activate(); Pause(250);
+                int parentMoves = 0; match.LocationChanged += (s, e) => parentMoves++; match.SizeChanged += (s, e) => parentMoves++;
+                NativeRect bounds; GetWindowRect(new WindowInteropHelper(batch).Handle, out bounds);
+                var crop = new Rectangle((bounds.Left + bounds.Right) / 2 - 400, (bounds.Top + bounds.Bottom) / 2 - 225, 800, 450);
+                using (var recording = new Recording(crop))
+                {
+                    recording.Start(); Pause(150); recording.Mark("close real batch"); CloseWithoutExitAnimation(batch); Pause(300);
+                    Check(match.IsVisible && parentMoves == 0, "实际一级弹窗在二级关闭后没有移动或缩放：" + state);
+                    recording.Mark("close real match"); CloseWithoutExitAnimation(match); Pause(350); recording.Stop(); recording.Save(Path.Combine(output, "Real-" + state));
+                    Check(recording.Frames.Count >= 35 && recording.Frames.All(x => x.WhiteFraction < .10), "实际来源→预览页面关闭无大面积白帧：" + state + "，" + recording.Frames.Count + " 帧，最大白色占比=" + recording.Frames.Max(x => x.WhiteFraction).ToString("P2"));
+                }
+                Check(main.IsVisible && match.CloseTransitionSuppressed && batch.CloseTransitionSuppressed, "真实弹窗关闭都应用退出过渡保护且主窗口可见：" + state);
+            }
+        }
+        sealed class ColorCloseDialog : DialogWindow
+        {
+            public ColorCloseDialog(string title, string color) : base(title, 780, 560)
+            {
+                WindowStartupLocation = WindowStartupLocation.Manual; Topmost = true;
+                Body.Children.Add(new Border { Background = Ui.Brush(color) });
+            }
+        }
+        static bool Near(System.Drawing.Color value, int r, int g, int b)
+        { return Math.Abs(value.R - r) <= 3 && Math.Abs(value.G - g) <= 3 && Math.Abs(value.B - b) <= 3; }
+        static void CheckFrame(bool passed, string detail) { if (!passed) throw new Exception(detail); }
+        static void CloseWithoutExitAnimation(DialogWindow window)
+        {
+            // Match the production OnClosing order in an isolated foreground
+            // simulation if Windows won't grant tool-launched apps foreground.
+            bool foreground = Ui.IsForeground(window);
+            if (!foreground)
+            {
+                if (!Ui.SuppressDialogCloseTransition(window) || !Ui.PrepareDialogClose(window, true)) throw new Exception("关闭交接准备失败");
+            }
+            CloseCaption(window);
+            if (!window.CloseTransitionSuppressed) throw new Exception("关闭弹窗没有应用退出过渡保护");
+            report.Add("INFO close path=" + (foreground ? "native foreground / OnClosing" : "isolated foreground simulation"));
+        }
         public static int Run()
         {
             string original = Paths.Root, output = Path.Combine(original, "tests", "output", "dialog-frames-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));

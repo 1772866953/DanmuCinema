@@ -6,6 +6,8 @@
   <SolidColorBrush x:Key="Surface" Color="#1C2A40"/>
   <SolidColorBrush x:Key="SurfaceRaised" Color="#26344D"/>
   <SolidColorBrush x:Key="Canvas" Color="#101827"/>
+  <SolidColorBrush x:Key="ServiceRunning" Color="#68D391"/>
+  <SolidColorBrush x:Key="ServiceStopped" Color="#FFFFFF"/>
   <!-- Native templates consult these during disable/activation transitions. -->
   <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#1C2A40"/>
   <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#1C2A40"/>

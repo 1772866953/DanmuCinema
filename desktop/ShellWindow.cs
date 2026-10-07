@@ -312,8 +312,17 @@ namespace DanmuCinema.Desktop
         {
             if (releasing) return;
             ((TextBlock)View.FindName("Footer")).Text = controller.BatchRunning ? controller.BatchStatus : controller.Status;
-            ((TextBlock)View.FindName("TrayStatus")).Text = controller.Services.OwnsProcess ? "● 视频服务运行中" : "○ 视频服务已停止";
-            if (server != null) { server.Text = controller.ServerStatus; danmu.Text = controller.Gateway.Running ? "运行中 · HTTP " + controller.Settings.DanmuPort : "已停止"; plugin.Text = controller.PluginStatus; playback.Text = controller.SessionStatus; }
+            var videoColor = (Brush)Ui.Resource(controller.Services.OwnsProcess ? "ServiceRunning" : "ServiceStopped");
+            var trayStatus = (TextBlock)View.FindName("TrayStatus");
+            trayStatus.Text = controller.Services.OwnsProcess ? "● 视频服务运行中" : "○ 视频服务已停止";
+            trayStatus.Foreground = videoColor;
+            if (server != null)
+            {
+                server.Text = controller.ServerStatus; server.Foreground = videoColor;
+                danmu.Text = controller.Gateway.Running ? "运行中 · HTTP " + controller.Settings.DanmuPort : "已停止";
+                danmu.Foreground = (Brush)Ui.Resource(controller.Gateway.Running ? "ServiceRunning" : "ServiceStopped");
+                plugin.Text = controller.PluginStatus; playback.Text = controller.SessionStatus;
+            }
             if (batchStatus != null) { batchStatus.Text = controller.BatchPlan == null ? "暂无下载任务。到「影片与弹幕」匹配作品并选择集数。" : controller.BatchStatus; batchResume.IsEnabled = controller.BatchPlan != null; }
             if (grid != null) { if (!Object.ReferenceEquals(renderedEntries, controller.Library.Entries)) ApplyLibrary(); else SyncSelection(); }
             RenderSchedule();

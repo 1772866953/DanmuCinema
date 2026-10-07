@@ -55,6 +55,16 @@ namespace DanmuCinema.Desktop
         }
         internal static bool PrepareDialogClose(Window window)
         { return PrepareDialogClose(window, IsForeground(window)); }
+        internal static bool SuppressDialogCloseTransition(Window window)
+        {
+            var handle = new WindowInteropHelper(window).Handle;
+            if (handle == IntPtr.Zero) return false;
+            // A dying dialog must not animate a second snapshot after its owner
+            // becomes active. Only this HWND's final close transition is removed;
+            // live windows retain their normal maximize/restore/open animations.
+            try { int disabled = 1; return DwmSetWindowAttribute(handle, 3, ref disabled, sizeof(int)) == 0; }
+            catch (DllNotFoundException) { return false; }
+        }
         internal static bool PrepareDialogClose(Window window, bool foreground)
         {
             var owner = window.Owner;
