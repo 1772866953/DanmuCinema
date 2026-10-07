@@ -26,7 +26,7 @@ namespace DanmuCinema.Desktop
         readonly DispatcherTimer placementTimer;
         readonly DispatcherTimer viewTimer;
         readonly List<Window> dialogs = new List<Window>();
-        public bool HasOpenDialogs { get { return dialogs.Any(x => x.IsVisible); } }
+        public bool HasOpenDialogs { get { return WorkspaceVisible || dialogs.Any(x => x.IsVisible); } }
         WindowPlacement placement;
         bool ready, releasing, synchronizing, closingQueued;
         FrameworkElement page;
@@ -43,9 +43,9 @@ namespace DanmuCinema.Desktop
             var iconFile = Path.Combine(Paths.Root, "assets", "DanmuCinema.ico");
             if (File.Exists(iconFile)) View.Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri(iconFile));
             var nav = (StackPanel)View.FindName("Navigation");
-            string[] keys = { "overview", "library", "connect", "setup", "settings", "schedule", "cache", "logs" };
-            string[] titles = { "服务总览", "影片与弹幕", "连接 iPad", "首次设置", "启动与偏好", "定时任务", "缓存管理", "运行日志" };
-            string[] icons = { "\uE80F", "\uE8B7", "\uE8EA", "\uE713", "\uE115", "\uE823", "\uE8B7", "\uE9D9" };
+            string[] keys = { "overview", "library", "tasks", "connect", "setup", "settings", "schedule", "cache", "logs" };
+            string[] titles = { "服务总览", "影片与弹幕", "下载任务", "连接 iPad", "首次设置", "启动与偏好", "定时任务", "缓存管理", "运行日志" };
+            string[] icons = { "\uE80F", "\uE8B7", "\uE896", "\uE8EA", "\uE713", "\uE115", "\uE823", "\uE8B7", "\uE9D9" };
             for (int i = 0; i < keys.Length; i++)
             {
                 string key = keys[i]; var button = Ui.Button(titles[i], () => Navigate(key)); button.Style = (Style)Ui.Resource("Navigation");
@@ -72,8 +72,8 @@ namespace DanmuCinema.Desktop
             if (!View.IsVisible) View.Show();
             if (View.WindowState == WindowState.Minimized) View.WindowState = placement != null && placement.Maximized ? WindowState.Maximized : WindowState.Normal;
             View.Activate();
-            if (session.Match != null && session.Match.Open && !dialogs.OfType<MatchWindow>().Any()) OpenMatchWindow(false);
-            if (controller.BatchRunning && !dialogs.OfType<BatchWindow>().Any()) ShowBatch();
+            if (session.Match != null && session.Match.Open && !WorkspaceVisible) OpenMatchWindow(false);
+            if (controller.BatchRunning && !WorkspaceVisible) ShowBatch();
             if (session.Page == "schedule") viewTimer.Start();
         }
         void SourceInitialized(object sender, EventArgs e)
@@ -94,7 +94,7 @@ namespace DanmuCinema.Desktop
         }
         IntPtr WindowHook(IntPtr hwnd, int message, IntPtr wparam, IntPtr lparam, ref bool handled)
         {
-            if (message == 0x319 && (session.Page == "library" || session.Page == "cache"))
+            if (message == 0x319 && (WorkspaceVisible || session.Page == "library" || session.Page == "cache"))
             {
                 int command = (int)((lparam.ToInt64() >> 16) & 0x7ff);
                 if (command == 1 || command == 2) { NavigatePageHistory(command == 2); handled = true; return new IntPtr(1); }
@@ -145,9 +145,9 @@ namespace DanmuCinema.Desktop
             RememberPlacement(); SavePlacement(); SavePageState(); releasing = true;
             viewTimer.Stop(); viewTimer.Tick -= ViewTick; placementTimer.Stop(); placementTimer.Tick -= PlacementTick;
             controller.Changed -= Render; Log.Added -= LogAdded;
-            foreach (var dialog in dialogs.AsEnumerable().Reverse().ToArray()) if (dialogs.Contains(dialog)) dialog.Close(); dialogs.Clear();
+            foreach (var dialog in dialogs.AsEnumerable().Reverse().ToArray()) if (dialogs.Contains(dialog)) { var animated = dialog as DialogWindow; if (animated != null) animated.CloseImmediately(); else dialog.Close(); } dialogs.Clear();
             var source = (HwndSource)PresentationSource.FromVisual(View); if (source != null) source.RemoveHook(WindowHook);
-            ClearPage(); Ui.StopAnimations(View);
+            CloseWorkspace(true); ClearPage(); Ui.ReleaseVisualTree(View);
             Keyboard.ClearFocus(); FocusManager.SetFocusedElement(View, null);
             View.Closing -= OnClosing; View.SourceInitialized -= SourceInitialized; View.SizeChanged -= GeometryChanged; View.LocationChanged -= LocationChanged; View.StateChanged -= StateChanged; View.PreviewKeyDown -= KeyDown; View.PreviewMouseUp -= MouseUp;
             View.Close(); host.Content = null; View.Content = null; navigation.Clear();
@@ -157,22 +157,32 @@ namespace DanmuCinema.Desktop
         }
         void KeyDown(object sender, KeyEventArgs e)
         {
-            if (e.Key == Key.Escape && controller.Scheduler.Active) { controller.CancelSchedule(); e.Handled = true; }
-            else if ((session.Page == "library" || session.Page == "cache") && (Keyboard.Modifiers & ModifierKeys.Alt) != 0 && (e.SystemKey == Key.Left || e.SystemKey == Key.Right)) { NavigatePageHistory(e.SystemKey == Key.Right); e.Handled = true; }
+            if (e.Key == Key.Escape && WorkspaceVisible) { RequestWorkspaceClose(); e.Handled = true; }
+            else if (e.Key == Key.Escape && controller.Scheduler.Active) { controller.CancelSchedule(); e.Handled = true; }
+            else if (TryNavigateHistory(e.Key == Key.System ? e.SystemKey : e.Key, Keyboard.Modifiers)) e.Handled = true;
+        }
+        internal bool TryNavigateHistory(Key key, ModifierKeys modifiers)
+        {
+            if (!(WorkspaceVisible || session.Page == "library" || session.Page == "cache") || (modifiers & ModifierKeys.Alt) == 0 || (key != Key.Left && key != Key.Right)) return false;
+            NavigatePageHistory(key == Key.Right); return true;
         }
         void MouseUp(object sender, MouseButtonEventArgs e)
-        { if ((session.Page == "library" || session.Page == "cache") && (e.ChangedButton == MouseButton.XButton1 || e.ChangedButton == MouseButton.XButton2)) { NavigatePageHistory(e.ChangedButton == MouseButton.XButton2); e.Handled = true; } }
+        { if ((WorkspaceVisible || session.Page == "library" || session.Page == "cache") && (e.ChangedButton == MouseButton.XButton1 || e.ChangedButton == MouseButton.XButton2)) { NavigatePageHistory(e.ChangedButton == MouseButton.XButton2); e.Handled = true; } }
         void NavigatePageHistory(bool forward)
-        { var cachePage = page as CachePage; if (cachePage != null) cachePage.NavigateHistory(forward); else NavigateHistory(forward); }
+        {
+            if (WorkspaceVisible) { if (forward && controller.BatchPlan != null) MountBatch(); else if (!forward && session.Match != null) MountMatch(false); else if (!forward) CloseWorkspace(false); return; }
+            var cachePage = page as CachePage; if (cachePage != null) cachePage.NavigateHistory(forward); else NavigateHistory(forward);
+        }
         public void Navigate(string key)
         {
             if (!navigation.ContainsKey(key)) key = "overview";
+            CloseWorkspace(false);
             SavePageState(); ClearPage(); session.Page = key;
             foreach (var pair in navigation) { pair.Value.Background = Ui.Brush(pair.Key == key ? "#344668" : "#0014243A"); pair.Value.Foreground = Ui.Brush(pair.Key == key ? "#FFFFFF" : "#AEBED2"); }
-            var titles = new Dictionary<string, string> { { "overview", "服务总览" }, { "library", "影片与弹幕" }, { "connect", "连接 iPad" }, { "setup", "首次设置" }, { "settings", "启动与偏好" }, { "schedule", "定时任务" }, { "cache", "缓存管理" }, { "logs", "运行日志" } };
+            var titles = new Dictionary<string, string> { { "overview", "服务总览" }, { "library", "影片与弹幕" }, { "tasks", "下载任务" }, { "connect", "连接 iPad" }, { "setup", "首次设置" }, { "settings", "启动与偏好" }, { "schedule", "定时任务" }, { "cache", "缓存管理" }, { "logs", "运行日志" } };
             ((TextBlock)View.FindName("Heading")).Text = titles[key];
-            ((TextBlock)View.FindName("Subtitle")).Text = key == "library" ? "浏览媒体库，选择影片，为每一集找到合适的弹幕。" : key == "schedule" ? "倒计时或指定时间，托盘中继续运行。" : key == "connect" ? "连接你的电脑，在 iPad 上原画播放。" : key == "cache" ? "先读本地数据，减少官方接口请求。" : key == "settings" ? "让启动、播放和后台运行按你的习惯工作。" : key == "setup" ? "设置账号和媒体库，开启你的家庭影院。" : "在电脑管理媒体，在 iPad 原画播放。";
-            page = key == "library" ? BuildLibrary() : key == "overview" ? BuildOverview() : key == "connect" ? BuildConnect() : key == "setup" ? BuildSetup() : key == "settings" ? BuildSettings() : key == "schedule" ? BuildSchedule() : key == "cache" ? BuildCache() : BuildLogs();
+            ((TextBlock)View.FindName("Subtitle")).Text = key == "tasks" ? "提前准备、查看进度，集中处理需要确认的影片。" : key == "library" ? "浏览媒体库，选择影片，为每一集找到合适的弹幕。" : key == "schedule" ? "倒计时或指定时间，托盘中继续运行。" : key == "connect" ? "连接你的电脑，在 iPad 上原画播放。" : key == "cache" ? "先读本地数据，减少官方接口请求。" : key == "settings" ? "让启动、播放和后台运行按你的习惯工作。" : key == "setup" ? "设置账号和媒体库，开启你的家庭影院。" : "在电脑管理媒体，在 iPad 原画播放。";
+            page = key == "library" ? BuildLibrary() : key == "tasks" ? BuildTasks() : key == "overview" ? BuildOverview() : key == "connect" ? BuildConnect() : key == "setup" ? BuildSetup() : key == "settings" ? BuildSettings() : key == "schedule" ? BuildSchedule() : key == "cache" ? BuildCache() : BuildLogs();
             host.Content = page; Ui.Animate(host); Ui.AnimateAccent((Border)View.FindName("PageAccent")); Render();
             if (key == "schedule") viewTimer.Start(); else viewTimer.Stop();
             double offset;
@@ -186,9 +196,10 @@ namespace DanmuCinema.Desktop
         }
         void ClearPage()
         {
+            StopFolderCovers(); bulkActions = null;
             if (libraryMenu != null) { libraryMenu.IsOpen = false; libraryMenu.Items.Clear(); libraryMenu.PlacementTarget = null; libraryMenu.DataContext = null; libraryMenu = null; }
             foreach (var resource in pageResources) resource.Dispose(); pageResources.Clear();
-            if (page != null) Ui.StopAnimations(page); page = null; host.Content = null; renderedEntries = null;
+            if (page != null) Ui.ReleaseVisualTree(page); page = null; host.Content = null; renderedEntries = null;
             server = danmu = plugin = playback = count = location = scheduleStatus = countdown = scheduleTarget = batchStatus = null;
             logs = null; grid = null; rows = null; all = null; librarySearch = null; scheduleEditor = null; scheduleStart = scheduleCancel = batchResume = null; scheduleProgress = null;
         }
@@ -217,9 +228,7 @@ namespace DanmuCinema.Desktop
             var state = new Grid(); state.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(140) }); state.ColumnDefinitions.Add(new ColumnDefinition());
             string[] labels = { "视频服务器", "弹幕接口", "弹幕插件", "播放会话" }; TextBlock[] values = { server, danmu, plugin, playback };
             for (int i = 0; i < labels.Length; i++) { state.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); var label = Ui.Label(labels[i]); values[i].Margin = new Thickness(0, 0, 0, 16); Grid.SetRow(label, i); Grid.SetRow(values[i], i); Grid.SetColumn(values[i], 1); state.Children.Add(label); state.Children.Add(values[i]); }
-            batchStatus = Ui.Text("", "Note"); batchResume = Ui.Button("查看下载任务", ShowBatch);
             return Scroll(Ui.Card("服务状态", state, Ui.Row(Command("启动服务", controller.StartAll, true), Command("停止服务", controller.StopAll), Ui.Button("打开媒体库", () => DesktopController.Open(controller.LocalUrl + "/web/")), Command("扫描媒体库", controller.ScanLibrary))),
-                Ui.Card("弹幕下载任务", batchStatus, Ui.Row(batchResume)),
                 Ui.Card("开始使用", Ui.Text("01   在「首次设置」创建账号、添加视频目录。\n02   在「连接 iPad」复制服务器地址。\n03   在「影片与弹幕」选择来源，匹配并下载弹幕。", "Note")),
                 Ui.Text("视频由 Jellyfin 直接传输。关闭到托盘后，播放服务、下载和定时任务继续运行。", "Note"));
         }
@@ -311,7 +320,7 @@ namespace DanmuCinema.Desktop
         void Render()
         {
             if (releasing) return;
-            ((TextBlock)View.FindName("Footer")).Text = controller.BatchRunning ? controller.BatchStatus : controller.Status;
+            ((TextBlock)View.FindName("Footer")).Text = controller.Preparing ? controller.PreparationStatus : controller.BatchRunning ? controller.BatchStatus : controller.Status;
             var videoColor = (Brush)Ui.Resource(controller.Services.OwnsProcess ? "ServiceRunning" : "ServiceStopped");
             var trayStatus = (TextBlock)View.FindName("TrayStatus");
             trayStatus.Text = controller.Services.OwnsProcess ? "● 视频服务运行中" : "○ 视频服务已停止";
@@ -335,15 +344,17 @@ namespace DanmuCinema.Desktop
         public void Track(Window dialog, Window owner = null)
         { dialog.Owner = owner ?? dialogs.LastOrDefault(x => x.IsActive && x.IsVisible) ?? View; dialog.ShowInTaskbar = false; dialogs.Add(dialog); dialog.Closed += (s, e) => dialogs.Remove(dialog); dialog.Show(); }
         public void ShowBatch() { ShowBatch(null); }
-        public void ShowBatch(Window owner) { var existing = dialogs.OfType<BatchWindow>().FirstOrDefault(); if (existing != null) { existing.Activate(); return; } if (controller.BatchPlan != null) Track(new BatchWindow(controller), owner); }
-        void OpenMatchWindow(bool autoSearch) { Track(new MatchWindow(controller, this, session.Match, autoSearch)); }
+        public void ShowBatch(Window owner) { if (owner != null) { var existing = dialogs.OfType<BatchWindow>().FirstOrDefault(); if (existing != null) { existing.Activate(); return; } if (controller.BatchPlan != null) Track(new BatchWindow(controller), owner); } else if (controller.BatchPlan != null) MountBatch(); else Navigate("tasks"); }
+        void OpenMatchWindow(bool autoSearch) { MountMatch(autoSearch); }
         public void Match(Dictionary<string, object> item, DanmuMatchScope scope, Dictionary<string, object>[] selected)
         {
             if (controller.Busy || controller.Loading || controller.BatchRunning) return;
             try
             {
                 if (scope == DanmuMatchScope.Selection) MediaLibrary.RequireSameSeason(selected);
-                var existing = dialogs.OfType<MatchWindow>().FirstOrDefault(); if (existing != null) { existing.Activate(); return; }
+                if (WorkspaceVisible) { MountMatch(false); return; }
+                bool reuse = session.Match != null && session.Match.Scope == scope && Json.Text(session.Match.Item, "Id") == Json.Text(item, "Id") && session.Match.Selected.Select(x => Json.Text(x, "Id")).SequenceEqual((selected ?? new Dictionary<string, object>[0]).Select(x => Json.Text(x, "Id")));
+                if (reuse) { OpenMatchWindow(session.Match.Sources.Length == 0); return; }
                 session.Match = new MatchState { Item = item, Selected = selected ?? new Dictionary<string, object>[0], Scope = scope, Keyword = item == null ? session.Filter : MediaNames.SearchTitle(item), AnimeOnly = item != null && Json.Text(item, "Type") == "Movie" ? false : controller.Settings.AnimeOnly };
                 OpenMatchWindow(true);
             }

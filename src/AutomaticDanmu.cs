@@ -24,6 +24,10 @@ namespace DanmuCinema
         Timer timer;
         Task polling = Task.FromResult(0);
         public event Action<string> Saved;
+        public event Action<Dictionary<string, object>, string, string, string> Progress;
+        void Report(Dictionary<string, object> item, string status, string detail, string origin) { var handler = Progress; if (handler != null) handler(item, status, detail, origin); }
+        public async Task<bool> PrepareQueuedItem(Dictionary<string, object> item, CancellationToken cancellation)
+        { await serial.WaitAsync(cancellation).ConfigureAwait(false); try { return await PrepareItem(item, cancellation, "提前准备").ConfigureAwait(false); } finally { serial.Release(); } }
         public bool Running { get { lock (sync) return timer != null; } }
         public void SuppressUntilPlaybackEnds(IEnumerable<string> ids)
         { lock (sync) foreach (string id in ids.Where(x => !String.IsNullOrEmpty(x))) suppressed.Add(id); }
@@ -85,22 +89,31 @@ namespace DanmuCinema
             if (await Task.WhenAny(job, cancelled).ConfigureAwait(false) != job) cancellation.ThrowIfCancellationRequested();
             await job.ConfigureAwait(false); return true;
         }
-        public async Task<bool> PrepareItem(Dictionary<string, object> item, CancellationToken cancellation)
+        public async Task<bool> PrepareItem(Dictionary<string, object> item, CancellationToken cancellation, string origin = "播放准备")
         {
-            string video = Json.Text(item, "Path"); if (!File.Exists(video)) return false;
+            try { return await PrepareItemCore(item, cancellation, origin).ConfigureAwait(false); }
+            catch (OperationCanceledException) { Report(item, cancellation.IsCancellationRequested ? "已停止" : "准备超时", "可继续准备或手动重试", origin); throw; }
+            catch { Report(item, "准备失败", "接口或文件处理失败，可手动重试", origin); throw; }
+        }
+        async Task<bool> PrepareItemCore(Dictionary<string, object> item, CancellationToken cancellation, string origin)
+        {
+            string video = Json.Text(item, "Path"); if (!File.Exists(video)) { Report(item, "文件已移除", "本地视频不存在，跳过此任务", origin); return false; }
             string xml = Path.ChangeExtension(video, ".xml");
             // Preserve explicit selections and existing sidecar files. Manual replacement remains available.
-            if (File.Exists(xml) && new FileInfo(xml).Length > 0) return false;
+            if (File.Exists(xml) && new FileInfo(xml).Length > 0) { Report(item, "已就绪", "保留已有 XML", origin); return false; }
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
             {
                 timeout.CancelAfter(TimeSpan.FromMinutes(2));
+                Report(item, "匹配中", "缓存优先 · 文件指纹 → 文件名", origin);
                 var episode = await catalog.AutomaticEpisode(item, timeout.Token).ConfigureAwait(false);
-                if (episode == null) { Log.Write("自动弹幕：未找到唯一可靠候选，请手动匹配「" + Path.GetFileName(video) + "」。"); return false; }
+                if (episode == null) { Report(item, "待确认", "没有唯一可靠候选，请手动选择来源", origin); Log.Write("自动弹幕：未找到唯一可靠候选，请手动匹配「" + Path.GetFileName(video) + "」。"); return false; }
+                Report(item, "下载中", Json.Text(episode, "MatchMethod") == "hash" ? "文件指纹一致" : "文件名与集数匹配", origin);
                 string content = await catalog.Download(episode, timeout.Token).ConfigureAwait(false);
-                if (DanmuCatalog.ParseXml(content).GetElementsByTagName("d").Count == 0) return false;
+                if (DanmuCatalog.ParseXml(content).GetElementsByTagName("d").Count == 0) { Report(item, "暂无弹幕", "此集暂无可用弹幕", origin); return false; }
                 timeout.Token.ThrowIfCancellationRequested();
                 if (!SettingsStore.WriteMissingSidecar(xml, content)) return false;
                 catalog.RecordAssociation(item, episode);
+                Report(item, "已就绪", catalog.EpisodeSource(episode), origin);
                 Log.Write("自动弹幕已保存：「" + Path.GetFileName(video) + "」 · " + (Json.Text(episode, "MatchMethod") == "hash" ? "hash 精确识别" : "文件名 / 剧集匹配"));
                 var saved = Saved; if (saved != null) saved(video); return true;
             }
@@ -113,6 +126,6 @@ namespace DanmuCinema
             Task[] active; lock (sync) active = jobs.Values.ToArray(); await Task.WhenAll(active).ConfigureAwait(false);
             lock (sync) { jobs.Clear(); attempts.Clear(); } cancellation.Dispose();
         }
-        public void Dispose() { lock (sync) { if (timer != null) { timer.Dispose(); timer = null; } if (stopping != null) stopping.Cancel(); Saved = null; } }
+        public void Dispose() { lock (sync) { if (timer != null) { timer.Dispose(); timer = null; } if (stopping != null) stopping.Cancel(); Saved = null; Progress = null; } }
     }
 }

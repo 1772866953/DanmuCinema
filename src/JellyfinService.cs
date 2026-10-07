@@ -153,6 +153,16 @@ namespace DanmuCinema
             return matches.ToArray();
         }
         public async Task<object[]> Plugins() { return Json.Read<object[]>(await Request("GET", "Plugins", null, true)); }
+        public async Task<byte[]> Poster(string id, string tag, CancellationToken cancellation)
+        {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(id ?? "", "^[a-zA-Z0-9]{1,64}$") || String.IsNullOrEmpty(Token)) return null;
+            using (var request = new HttpRequestMessage(HttpMethod.Get, "http://127.0.0.1:" + settings.Port + "/Items/" + id + "/Images/Primary?maxWidth=100&quality=80&tag=" + Uri.EscapeDataString(tag ?? "")))
+            {
+                request.Headers.TryAddWithoutValidation("X-Emby-Token", Token);
+                using (var response = await client.SendAsync(request, cancellation))
+                { if (!response.IsSuccessStatusCode) return null; return await response.Content.ReadAsByteArrayAsync(); }
+            }
+        }
         public async Task<object[]> Sessions() { return Json.Read<object[]>(await Request("GET", "Sessions", null, true)); }
         public void Dispose() { client.Dispose(); }
     }

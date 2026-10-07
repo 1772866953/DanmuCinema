@@ -1,4 +1,4 @@
-﻿param([string]$Executable = 'DanmuCinema.updated.exe', [string]$Keyword = '骸骨骑士')
+﻿param([string]$Executable = 'DanmuCinema.exe', [string]$Keyword = '骸骨骑士')
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $projectRoot = Split-Path -Parent $PSScriptRoot

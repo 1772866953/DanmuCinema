@@ -50,7 +50,7 @@ namespace DanmuCinema.Desktop
             this.navigation = navigation ?? new LibraryNavigation();
             RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); RowDefinitions.Add(new RowDefinition()); RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             summary = Ui.Text("正在读取本地缓存…", "Note");
-            filter = Ui.Combo(new[] { "全部缓存", "文件特征", "文件识别", "弹幕", "搜索 / 作品详情" }, filterIndex, 200);
+            filter = Ui.Combo(new[] { "全部缓存", "文件特征", "文件识别", "弹幕", "搜索 / 作品详情", "封面" }, filterIndex, 200);
             retention = Ui.Combo(CacheRetention.Labels, Array.IndexOf(CacheRetention.Months, cache.RetentionMonths), 150);
             System.Windows.Automation.AutomationProperties.SetName(filter, "缓存类型");
             System.Windows.Automation.AutomationProperties.SetName(retention, "统一缓存有效期");

@@ -31,7 +31,7 @@ namespace DanmuCinema
         public DateTime ExpiresUtc { get; set; }
         public string Content { get; set; }
         public long Bytes { get; set; }
-        public string TypeLabel { get { return Kind == "hash" ? "文件特征" : Kind == "match" ? "文件识别" : Kind == "comment" ? "弹幕" : "搜索 / 作品详情"; } }
+        public string TypeLabel { get { return Kind == "hash" ? "文件特征" : Kind == "match" ? "文件识别" : Kind == "comment" ? "弹幕" : Kind == "poster" ? "封面" : "搜索 / 作品详情"; } }
         public string SizeLabel { get { return (Bytes / 1000000.0).ToString("N2") + " MB"; } }
         public string CreatedLabel { get { return CreatedUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"); } }
         public string ExpiresLabel { get { return ExpiresUtc == DateTime.MaxValue ? "长期" : ExpiresUtc <= DateTime.UtcNow ? "已过期" : ExpiresUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"); } }

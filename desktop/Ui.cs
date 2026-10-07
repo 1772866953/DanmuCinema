@@ -84,19 +84,29 @@ namespace DanmuCinema.Desktop
             owner.Activate(); return raised;
         }
         public static Brush Brush(string color) { var value = (SolidColorBrush)new BrushConverter().ConvertFromString(color); value.Freeze(); return value; }
+        public static Brush StatusBrush(string status)
+        {
+            string key = status == "已就绪" || (status ?? "").StartsWith("已保存") || status == "保留已有 XML" ? "ServiceRunning" : (status ?? "").Contains("失败") || (status ?? "").Contains("超时") ? "StatusError" : status == "待匹配" || status == "等待准备" || status == "已暂停" || status == "待确认" || status == "暂无弹幕" ? "StatusWaiting" : "Accent";
+            return (Brush)Resource(key);
+        }
         public static object Resource(string name) { return Application.Current.FindResource(name); }
         public static T Load<T>(string name)
         {
-            using (var stream = typeof(Ui).Assembly.GetManifestResourceStream("DanmuCinema.Desktop." + name)) return (T)XamlReader.Load(stream);
+            using (var stream = typeof(Ui).Assembly.GetManifestResourceStream("DanmuCinema.Desktop." + name))
+            using (var reader = new System.IO.StreamReader(stream))
+                return (T)XamlReader.Parse(reader.ReadToEnd().Replace("assembly=DanmuCinema\"", "assembly=" + typeof(Ui).Assembly.GetName().Name + "\""));
         }
         public static void InstallTheme(Application application) { application.Resources.MergedDictionaries.Add(Load<ResourceDictionary>("Theme.xaml")); }
         public static TextBlock Text(string text, string style = null)
         { var value = new TextBlock { Text = text }; if (style != null) value.Style = (Style)Resource(style); return value; }
+        static readonly DependencyProperty ButtonActionProperty = DependencyProperty.RegisterAttached("ButtonAction", typeof(Action), typeof(Ui));
+        static void InvokeButtonAction(object sender, RoutedEventArgs e)
+        { var action = ((Button)sender).GetValue(ButtonActionProperty) as Action; if (action != null) action(); }
         public static Button Button(string text, Action action, bool primary = false)
         {
             var button = new Button { Content = text }; AutomationProperties.SetName(button, text);
             if (primary) button.Style = (Style)Resource("Primary");
-            button.Click += (s, e) => action(); return button;
+            button.SetValue(ButtonActionProperty, action); button.Click += InvokeButtonAction; return button;
         }
         public static WrapPanel Row(params UIElement[] children)
         { var row = new WrapPanel { VerticalAlignment = VerticalAlignment.Center }; foreach (var child in children) row.Children.Add(child); return row; }
@@ -131,6 +141,14 @@ namespace DanmuCinema.Desktop
             if (!SystemParameters.ClientAreaAnimation) return;
             line.BeginAnimation(FrameworkElement.WidthProperty, new DoubleAnimation(28, 64, TimeSpan.FromMilliseconds(180)) { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop });
         }
+        public static void AnimateSurface(Border surface)
+        {
+            var background = surface.Background as SolidColorBrush;
+            if (background == null || !SystemParameters.ClientAreaAnimation) return;
+            var color = background.Color; var brush = new SolidColorBrush(color); surface.Background = brush;
+            var start = Color.FromArgb(color.A, (byte)Math.Min(255, color.R + 6), (byte)Math.Min(255, color.G + 6), (byte)Math.Min(255, color.B + 8));
+            brush.BeginAnimation(SolidColorBrush.ColorProperty, new ColorAnimation(start, color, TimeSpan.FromMilliseconds(160)) { FillBehavior = FillBehavior.Stop });
+        }
         public static System.Windows.Shapes.Path CaptionGlyph(string kind)
         {
             string data = kind == "minimize" ? "M 1,7 L 13,7" : kind == "maximize" ? "M 2,2 L 12,2 12,12 2,12 Z" : kind == "restore" ? "M 5,2 L 12,2 12,9 M 2,5 L 9,5 9,12 2,12 Z" : "M 2,2 L 12,12 M 12,2 L 2,12";
@@ -149,8 +167,17 @@ namespace DanmuCinema.Desktop
             background.Children.Add(new System.Windows.Shapes.Ellipse { Width = 500, Height = 380, Fill = blue, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -160, -130, 0) });
             background.Children.Add(new System.Windows.Shapes.Ellipse { Width = 410, Height = 380, Fill = teal, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(-140, 0, 0, -150) }); return background;
         }
-        public static void StopAnimations(DependencyObject root)
+        public static void ReleaseVisualTree(DependencyObject root)
         {
+            // UI Automation clients can temporarily retain a disposed control.
+            // Its action must no longer keep the window/workspace alive.
+            var button = root as Button;
+            if (button != null) { button.ClearValue(ButtonActionProperty); button.Click -= InvokeButtonAction; }
+            var framework = root as FrameworkElement;
+            if (framework != null) { framework.BeginAnimation(FrameworkElement.WidthProperty, null); framework.BeginAnimation(FrameworkElement.MaxHeightProperty, null); }
+            var border = root as Border;
+            var background = border == null ? null : border.Background as SolidColorBrush;
+            if (background != null && !background.IsFrozen) background.BeginAnimation(SolidColorBrush.ColorProperty, null);
             var element = root as UIElement;
             if (element != null)
             {
@@ -158,7 +185,7 @@ namespace DanmuCinema.Desktop
                 var transform = element.RenderTransform as TranslateTransform;
                 if (transform != null) transform.BeginAnimation(TranslateTransform.YProperty, null);
             }
-            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) StopAnimations(VisualTreeHelper.GetChild(root, i));
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) ReleaseVisualTree(VisualTreeHelper.GetChild(root, i));
         }
         public static T Ancestor<T>(DependencyObject element) where T : DependencyObject
         { while (element != null && !(element is T)) element = element is Visual || element is System.Windows.Media.Media3D.Visual3D ? VisualTreeHelper.GetParent(element) : LogicalTreeHelper.GetParent(element); return element as T; }
@@ -186,11 +213,11 @@ namespace DanmuCinema.Desktop
             list = new StackPanel();
             // StaysOpen=false captures the mouse and interrupts the editor's first click.
             // Outside clicks are observed on the owner without consuming that click.
-            popup = new Popup { PlacementTarget = this, Placement = PlacementMode.Bottom, StaysOpen = true, AllowsTransparency = true, PopupAnimation = PopupAnimation.None, Focusable = false };
+            popup = new Popup { PlacementTarget = this, Placement = PlacementMode.Bottom, StaysOpen = true, AllowsTransparency = true, PopupAnimation = PopupAnimation.Slide, Focusable = false };
             var clear = Ui.Button("清空历史", () => { SearchHistory.Clear(scope); suppressed = true; BuildHistory(); }); clear.Style = (Style)Ui.Resource("TextAction");
             var heading = new Grid { Margin = new Thickness(2, 0, 2, 8) }; heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); heading.Children.Add(Ui.Text("搜索历史")); Grid.SetColumn(clear, 1); heading.Children.Add(clear);
             var body = Ui.Stack(heading, new ScrollViewer { Content = list, MaxHeight = 300, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
-            var surface = new Border { Width = Width, Child = body, Background = (Brush)Ui.Resource("Surface"), BorderBrush = (Brush)Ui.Resource("Line"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(10), Margin = new Thickness(0, 4, 0, 0) };
+            var surface = new SmoothBorder { Width = Width, Child = body, Background = (Brush)Ui.Resource("Surface"), BorderBrush = (Brush)Ui.Resource("Line"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(10), Margin = new Thickness(0, 4, 0, 0) };
             TextElement.SetForeground(surface, (Brush)Ui.Resource("Ink")); popup.Child = surface;
             remember = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1000) }; remember.Tick += RememberTick;
             Editor.PreviewMouseLeftButtonDown += (s, e) => { if (!popup.IsOpen) OpenHistory(); };

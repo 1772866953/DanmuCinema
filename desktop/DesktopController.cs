@@ -18,6 +18,8 @@ namespace DanmuCinema.Desktop
     {
         public string Page = "overview", Filter = "", Ip = "", ScrollKey = "";
         public int Sort, Order;
+        public bool LibraryDetails;
+        public System.Windows.Rect? WorkspaceBounds;
         public readonly LibraryNavigation Navigation = new LibraryNavigation();
         public readonly LibraryNavigation CacheNavigation = new LibraryNavigation();
         public int CacheFilter;
@@ -35,7 +37,7 @@ namespace DanmuCinema.Desktop
         public object[] Sources = new object[0], Episodes = new object[0];
         public int SourceIndex = -1, EpisodeIndex = -1;
     }
-    public sealed class DesktopController : IDisposable
+    public sealed partial class DesktopController : IDisposable
     {
         public readonly AppSettings Settings;
         public readonly ServiceManager Services;
@@ -70,8 +72,9 @@ namespace DanmuCinema.Desktop
         {
             this.application = application; Settings = settings;
             Services = new ServiceManager(settings); Gateway = new DanmuGateway(settings, catalog);
-            Automatic = new AutomaticDanmu(settings, Services.Api, Gateway.Catalog, () => Services.OwnsProcess && !Services.Transitioning && !Closing && !Busy && !BatchRunning);
+            Automatic = new AutomaticDanmu(settings, Services.Api, Gateway.Catalog, () => Services.OwnsProcess && !Services.Transitioning && !Closing && !Busy && !BatchRunning && !CancellingDownloads);
             Automatic.Saved += AutoSaved;
+            Automatic.Progress += AutoProgress;
             Gateway.PreparePlayback = Automatic.PrepareForPlayback;
             statusTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(30) };
             statusTimer.Tick += StatusTick;
@@ -130,16 +133,15 @@ namespace DanmuCinema.Desktop
             }
             finally { ReleasingWindow = false; }
         }
-        public async Task Execute(Func<Task> action)
+        public async Task Execute(Func<Task> action, bool showError = true)
         {
-            if (Busy || Loading || BatchRunning || Closing || Scheduler.State == ScheduleState.Executing) return;
+            if (Busy || Loading || BatchRunning || Closing || CancellingDownloads || Scheduler.State == ScheduleState.Executing) return;
             Busy = true; Status = "正在处理，请稍候…"; Publish();
             try { await action(); if (Status == "正在处理，请稍候…") Status = "操作完成"; }
             catch (Exception e)
             {
                 Status = e.Message; Log.Write(e.Message);
-                if (Window != null) AlertWindow.Show(Window.View, "操作未完成", e.Message, false);
-                else Notify("需要处理", e.Message);
+                if (showError) { if (Window != null) AlertWindow.Show(Window.View, "操作未完成", e.Message, false); else Notify("需要处理", e.Message); }
             }
             finally { Busy = false; Publish(); }
             await UpdateStatus();
@@ -285,20 +287,23 @@ namespace DanmuCinema.Desktop
         }
         public async Task RunBatch(Func<Dictionary<string, object>, CancellationToken, Task<string>> download = null)
         {
-            if (BatchRunning || Busy || Loading || BatchPlan == null || Closing) return;
+            if (BatchRunning || Busy || Loading || BatchPlan == null || Closing || CancellingDownloads) return;
             if (!BatchPlan.Any(x => x.Selected && x.Remote != null)) throw new InvalidOperationException("没有选择可下载的集数。");
-            BatchRunning = true; batchCancellation = new CancellationTokenSource(); Publish();
+            var operation = BeginDownload(BatchPlan.Where(x => x.Selected && x.Remote != null).Select(x => x.Local));
+            BatchRunning = true; batchCancellation = operation.Cancellation; Publish();
             try
             {
+                foreach (var entry in BatchPlan.Where(x => x.Selected && x.Remote != null)) SetDownloadState(entry.Local, entry.Status, "批量下载", Gateway.Catalog.EpisodeSource(entry.Remote), entry.Remote);
                 var result = await BatchDownloads.Run(BatchPlan, episode => download == null ? Gateway.Catalog.Download(episode, batchCancellation.Token) : download(episode, batchCancellation.Token), BatchKeep, batchCancellation.Token,
-                    (entry, done, total) => { BatchStatus = "处理 " + done + " / " + total + " · 第 " + entry.Number + " 集 " + entry.Status; Publish(); }, 1000, entry => Gateway.Catalog.RecordAssociation(entry.Local, entry.Remote));
+                    (entry, done, total) => { SetDownloadState(entry.Local, entry.Status, "批量下载", Gateway.Catalog.EpisodeSource(entry.Remote), entry.Remote); BatchStatus = "处理 " + done + " / " + total + " · 第 " + entry.Number + " 集 " + entry.Status; Publish(); }, Settings.DownloadIntervalSeconds * 1000, entry => Gateway.Catalog.RecordAssociation(entry.Local, entry.Remote));
+                foreach (var entry in BatchPlan.Where(x => x.Selected && x.Remote != null)) SetDownloadState(entry.Local, entry.Status, "批量下载", Gateway.Catalog.EpisodeSource(entry.Remote), entry.Remote);
                 BatchStatus = (result.Cancelled ? "已停止" : "下载完成") + "：保存 " + result.Saved + " 集，跳过 " + result.Skipped + " 集，失败 " + result.Failed + " 集。"; Log.Write(BatchStatus);
             }
             catch (Exception e) { BatchStatus = "下载未完成：" + e.Message; Log.Write(BatchStatus); }
-            finally { BatchRunning = false; batchCancellation.Dispose(); batchCancellation = null; Publish(); }
-            await RefreshMetadata();
+            finally { BatchRunning = false; batchCancellation = null; Publish(); }
+            try { await RefreshMetadata(); } finally { FinishDownload(operation); }
         }
-        public void CancelBatch() { if (batchCancellation != null) batchCancellation.Cancel(); }
+        public void CancelBatch() { if (Preparing) PausePreparation(); else if (batchCancellation != null) batchCancellation.Cancel(); }
         public async void StartBatch()
         {
             try { await RunBatch(); }
@@ -382,7 +387,8 @@ namespace DanmuCinema.Desktop
             if (showWait != null) showWait.Unregister(null); if (showSignal != null) showSignal.Dispose();
             Scheduler.Cancel(); ReleaseAwake();
             if (tray != null) { tray.Visible = false; tray.DoubleClick -= OpenFromTray; if (tray.ContextMenuStrip != null) tray.ContextMenuStrip.Dispose(); tray.Dispose(); }
-            Automatic.Saved -= AutoSaved; Automatic.Dispose();
+            if (preparationCancellation != null) preparationCancellation.Cancel();
+            Automatic.Progress -= AutoProgress; Automatic.Saved -= AutoSaved; Automatic.Dispose();
             if (icon != null) icon.Dispose(); Services.Dispose(); Gateway.Dispose(); Changed = null;
         }
     }

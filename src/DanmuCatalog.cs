@@ -288,6 +288,13 @@ namespace DanmuCinema
             }
             catch { Log.Write("弹幕 XML 已保存，但来源记录未更新；可重新选择来源。"); }
         }
+        public string EpisodeSource(Dictionary<string, object> episode)
+        {
+            string site = Json.Text(episode, "Site"); if (site != "") return site;
+            Dictionary<string, object> anime; lock (sync) animes.TryGetValue(Json.Text(episode, "AnimeId"), out anime);
+            site = Json.Text(anime, "Site"); if (site != "") return site;
+            try { return GetProvider(episode).Name; } catch { return Json.Text(episode, "Provider"); }
+        }
         public async Task<CatalogSearch> Search(string keyword, bool animeOnly, bool smart = true, int season = 0, string providerId = null, CancellationToken cancellation = default(CancellationToken))
         {
             if (String.IsNullOrWhiteSpace(keyword)) throw new ArgumentException("请输入作品名。");
@@ -400,7 +407,7 @@ namespace DanmuCinema
         {
             if (String.IsNullOrWhiteSpace(remote)) throw new InvalidDataException("来源缺少弹幕 ID");
             return new Dictionary<string, object> { { "Id", StableNumber(Json.Text(a, "Provider") + ":" + Json.Text(a, "SiteId") + ":episode:" + remote) },
-                { "AnimeId", Json.Text(a, "Id") }, { "AnimeTitle", Json.Text(a, "Name") }, { "Provider", Json.Text(a, "Provider") }, { "SiteId", Json.Text(a, "SiteId") }, { "CommentId", remote }, { "Number", number }, { "Title", title } };
+                { "AnimeId", Json.Text(a, "Id") }, { "AnimeTitle", Json.Text(a, "Name") }, { "Provider", Json.Text(a, "Provider") }, { "Site", Json.Text(a, "Site") }, { "SiteId", Json.Text(a, "SiteId") }, { "CommentId", remote }, { "Number", number }, { "Title", title } };
         }
         public Task<string> Download(Dictionary<string, object> episode) { return Download(episode, CancellationToken.None); }
         public async Task<string> Download(Dictionary<string, object> episode, CancellationToken cancellation)

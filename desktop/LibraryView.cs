@@ -18,10 +18,20 @@ namespace DanmuCinema.Desktop
     {
         public readonly LibraryEntry Entry;
         readonly LibrarySelection selection;
+        readonly DesktopController controller;
         public event PropertyChangedEventHandler PropertyChanged;
         public event Action Changed;
-        public LibraryRow(LibraryEntry entry, LibrarySelection selection) { Entry = entry; this.selection = selection; }
+        public LibraryRow(LibraryEntry entry, LibrarySelection selection, DesktopController controller = null) { Entry = entry; this.selection = selection; this.controller = controller; }
         public string Name { get { return (Entry.IsFolder ? "▸  " : "") + Entry.Name; } }
+        public string DisplayName { get { var clean = Entry.IsFolder ? SmartMatching.CleanTitle(Entry.Name) : MediaPresentation.Title(Entry.Item); return String.IsNullOrWhiteSpace(clean) ? Entry.Name : clean; } }
+        public string Filename { get { return Entry.IsFolder ? Entry.Members.Length + " 集 / 个影片 · " + Entry.Members.Count(x => x.HasXml) + " 个弹幕已就绪" : Entry.Name; } }
+        public string State { get { if (Entry.IsFolder) return "打开文件夹"; var task = controller == null ? null : controller.FindTask(Entry.Item); return task == null ? Entry.HasXml ? "已就绪" : "待匹配" : task.Status.StartsWith("已保存") || task.Status == "保留已有 XML" || task.Status == "已就绪" ? Entry.HasXml ? "已就绪" : "待匹配" : task.Status; } }
+        public Brush StateColor { get { return Ui.StatusBrush(State); } }
+        public string Source { get { return Entry.IsFolder ? "打开文件夹" : Entry.SourceLabel == "" ? Entry.HasXml ? "本地 XML  ▾" : "选择来源  ▾" : Entry.SourceLabel + "  ▾"; } }
+        public ImageSource Cover { get { return cover; } }
+        ImageSource cover;
+        public bool IsFolder { get { return Entry.IsFolder; } }
+        public void SetCover(ImageSource value) { cover = value; var handler = PropertyChanged; if (handler != null) handler(this, new PropertyChangedEventArgs("Cover")); }
         public string Type { get { return Entry.IsFolder ? "文件夹" : Entry.Type == "Episode" ? "剧集" : Entry.Type == "Movie" ? "电影" : "视频"; } }
         public string Modified { get { return Entry.ModifiedUtc.HasValue ? Entry.ModifiedUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "—"; } }
         public string Size { get { return Entry.Size.HasValue ? (Entry.Size.Value / 1e6).ToString("N2") + " MB" : "—"; } }
@@ -33,7 +43,7 @@ namespace DanmuCinema.Desktop
             get { int count = Entry.SelectionKeys.Count(selection.Contains); return count == 0 ? false : count == Entry.SelectionKeys.Length ? (bool?)true : null; }
             set { foreach (var key in Entry.SelectionKeys) selection.Set(key, value == true); Notify(); var handler = Changed; if (handler != null) handler(); }
         }
-        public void Notify() { var handler = PropertyChanged; if (handler != null) handler(this, new PropertyChangedEventArgs("Selected")); }
+        public void Notify() { var handler = PropertyChanged; if (handler != null) handler(this, new PropertyChangedEventArgs(null)); }
     }
     public sealed partial class ShellWindow
     {
@@ -42,6 +52,7 @@ namespace DanmuCinema.Desktop
         CheckBox all;
         HistoryInput librarySearch;
         ContextMenu libraryMenu;
+        WrapPanel bulkActions;
         Canvas selectionCanvas;
         Rectangle selectionBox;
         bool dragging, potentialDrag, dragAdditive;
@@ -53,18 +64,26 @@ namespace DanmuCinema.Desktop
             var panel = new Grid(); panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); panel.RowDefinitions.Add(new RowDefinition()); panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             librarySearch = new HistoryInput("library", session.Filter, true); pageResources.Add(librarySearch);
             librarySearch.Editor.TextChanged += (s, e) => { session.Filter = librarySearch.Editor.Text; session.Navigation.UpdateFilter(session.Filter); ApplyLibrary(); };
-            var sort = Ui.Combo(new[] { "名称", "修改日期", "大小", "类型", "平均码率" }, session.Sort, 140); var order = Ui.Combo(new[] { "升序", "降序" }, session.Order, 100);
+            librarySearch.Width = 250;
+            var sort = Ui.Combo(new[] { "名称", "修改日期", "大小", "类型", "平均码率" }, session.Sort, 115); var order = Ui.Combo(new[] { "升序", "降序" }, session.Order, 85);
             sort.SelectionChanged += (s, e) => { session.Sort = sort.SelectedIndex; ApplyLibrary(); }; order.SelectionChanged += (s, e) => { session.Order = order.SelectedIndex; ApplyLibrary(); };
             location = Ui.Text("", "Note"); count = Ui.Text("", "Note");
             var breadcrumb = new DockPanel();
-            breadcrumb.Children.Add(location);
-            var top = Ui.Stack(Ui.Row(librarySearch, Ui.Button("清除筛选", () => librarySearch.Editor.Clear()), Command("刷新列表", controller.LoadLibrary, true), Command("扫描媒体库", controller.ScanLibrary)),
-                Ui.Row(Ui.Label("排序"), sort, order, Ui.Button("取消全部选择", () => { controller.Library.Selection.Clear(); SyncSelection(); })),
-                breadcrumb,
-                Ui.Row(Ui.Button("选择弹幕来源", () => { var selected = controller.Library.SelectedItems; Match(selected.FirstOrDefault(), selected.Length > 1 ? DanmuMatchScope.Selection : DanmuMatchScope.Single, selected); }),
-                    Ui.Button("管理接口", () => Track(new SourcesWindow(controller))), Command("刷新选中弹幕", controller.RefreshDanmu), Command("导出 XML", ExportXml), Command("影片详情", () => { OpenDetails(); return Done(); }), Ui.Button("下载任务", ShowBatch)), count);
+            DockPanel.SetDock(count, Dock.Right); breadcrumb.Children.Add(count); breadcrumb.Children.Add(location);
+            location.TextWrapping = TextWrapping.NoWrap; location.TextTrimming = TextTrimming.CharacterEllipsis;
+            var clear = Ui.Button("清除", () => librarySearch.Editor.Clear()); clear.Style = (Style)Ui.Resource("TextAction");
+            var scan = Command("扫描媒体库", controller.ScanLibrary);
+            var sourcesButton = Ui.Button("管理接口", () => Track(new SourcesWindow(controller)));
+            var details = Ui.Check("完整列信息", session.LibraryDetails); details.Margin = new Thickness(4, 0, 0, 10);
+            details.Click += (s, e) => { session.LibraryDetails = details.IsChecked == true; FitLibraryColumns(); };
+            var search = Ui.Button("搜索弹幕", () => Match(null, DanmuMatchScope.Single, new Dictionary<string, object>[0]));
+            bulkActions = Ui.Row(Ui.Button("匹配已选影片", () => { var selected = controller.Library.SelectedItems; Match(selected.FirstOrDefault(), selected.Length > 1 ? DanmuMatchScope.Selection : DanmuMatchScope.Single, selected); }, true),
+                Ui.Button("提前准备弹幕", () => { var selected = controller.Library.SelectedItems; Navigate("tasks"); controller.StartPreparation(selected); }), Command("刷新选中弹幕", controller.RefreshDanmu));
+            var selectedMore = Ui.Button("已选操作", () => { }); selectedMore.Click += (s, e) => ShowLibraryActions(selectedMore, true); bulkActions.Children.Add(selectedMore);
+            bulkActions.Children.Add(Ui.Button("取消选择", () => { controller.Library.Selection.Clear(); SyncSelection(); }));
+            var top = Ui.Stack(Ui.Row(librarySearch, clear, sort, order, Command("刷新", controller.LoadLibrary), search, scan, sourcesButton, details), breadcrumb, bulkActions);
             panel.Children.Add(top);
-            grid = new DataGrid { IsReadOnly = false }; System.Windows.Automation.AutomationProperties.SetName(grid, "媒体库文件列表");
+            grid = new DataGrid { IsReadOnly = false, RowHeight = 66 }; System.Windows.Automation.AutomationProperties.SetName(grid, "媒体库文件列表");
             grid.ContextMenu = new ContextMenu();
             grid.ContextMenuOpening += (s, e) =>
             {
@@ -79,12 +98,15 @@ namespace DanmuCinema.Desktop
             all.Click += (s, e) => { if (!synchronizing && rows != null) { bool chosen = all.IsChecked == true; foreach (var row in rows) foreach (string key in row.Entry.SelectionKeys) controller.Library.Selection.Set(key, chosen); SyncSelection(); } };
             var checkTemplate = (DataTemplate)XamlReader.Parse("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><CheckBox IsChecked='{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}' Margin='0' HorizontalAlignment='Center' ToolTip='选择影片'/></DataTemplate>");
             grid.Columns.Add(new DataGridTemplateColumn { Header = all, CellTemplate = checkTemplate, Width = 44, CanUserSort = false });
-            string[] headers = { "文件 / 影片", "类型", "修改日期", "大小", "平均码率" }, bindings = { "Name", "Type", "Modified", "Size", "Bitrate" };
-            double[] widths = { 240, 76, 155, 125, 110 };
+            var nameTemplate = (DataTemplate)XamlReader.Parse("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><DockPanel ToolTip='{Binding Hint}'><Border Width='36' Height='50' CornerRadius='6' Background='#293A56' Margin='0,0,12,0'><Border.Clip><RectangleGeometry Rect='0,0,36,50' RadiusX='6' RadiusY='6'/></Border.Clip><Border.Style><Style TargetType='Border'><Setter Property='Visibility' Value='Collapsed'/><Style.Triggers><DataTrigger Binding='{Binding IsFolder}' Value='True'><Setter Property='Visibility' Value='Visible'/></DataTrigger></Style.Triggers></Style></Border.Style><Grid><TextBlock Text='▸' HorizontalAlignment='Center' Foreground='{DynamicResource Accent}'/><Image Source='{Binding Cover}' Stretch='UniformToFill'/></Grid></Border><StackPanel VerticalAlignment='Center'><TextBlock Text='{Binding DisplayName}' FontWeight='SemiBold' TextWrapping='NoWrap' TextTrimming='CharacterEllipsis'/><TextBlock Text='{Binding Filename}' Foreground='{DynamicResource Muted}' FontSize='11' Margin='0,4,0,0' TextWrapping='NoWrap' TextTrimming='CharacterEllipsis'/></StackPanel></DockPanel></DataTemplate>");
+            grid.Columns.Add(new DataGridTemplateColumn { Header = "作品 / 原始文件", CellTemplate = nameTemplate, SortMemberPath = "Name", Width = new DataGridLength(1, DataGridLengthUnitType.Star), MinWidth = 240 });
+            string[] headers = { "类型", "修改日期", "大小", "平均码率" }, bindings = { "Type", "Modified", "Size", "Bitrate" };
+            double[] widths = { 64, 142, 110, 92 };
             var textStyle = new Style(typeof(TextBlock)); textStyle.Setters.Add(new Setter(TextBlock.TextWrappingProperty, TextWrapping.NoWrap)); textStyle.Setters.Add(new Setter(TextBlock.TextTrimmingProperty, TextTrimming.CharacterEllipsis)); textStyle.Setters.Add(new Setter(TextBlock.ToolTipProperty, new Binding("Hint")));
-            for (int i = 0; i < headers.Length; i++) grid.Columns.Add(new DataGridTextColumn { Header = headers[i], Binding = new Binding(bindings[i]), SortMemberPath = bindings[i], Width = i == 0 ? new DataGridLength(1, DataGridLengthUnitType.Star) : new DataGridLength(widths[i]), MinWidth = i == 0 ? 200 : widths[i], IsReadOnly = true, ElementStyle = textStyle });
-            var danmuTemplate = (DataTemplate)XamlReader.Parse("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><Button Content='{Binding Danmu}' Padding='8,6' Margin='0' MinHeight='30' HorizontalContentAlignment='Left' ToolTip='重新选择单集、整季或已选影片的弹幕来源'/></DataTemplate>");
+            for (int i = 0; i < headers.Length; i++) grid.Columns.Add(new DataGridTextColumn { Header = headers[i], Binding = new Binding(bindings[i]), SortMemberPath = bindings[i], Width = new DataGridLength(widths[i]), MinWidth = widths[i], IsReadOnly = true, ElementStyle = textStyle });
+            var danmuTemplate = (DataTemplate)XamlReader.Parse("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><StackPanel VerticalAlignment='Center'><TextBlock Text='{Binding State}' Foreground='{Binding StateColor}' Margin='8,0,0,1' FontSize='12'><TextBlock.Style><Style TargetType='TextBlock'><Style.Triggers><DataTrigger Binding='{Binding IsFolder}' Value='True'><Setter Property='Visibility' Value='Collapsed'/></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock><Button Content='{Binding Source}' Padding='8,3' Margin='0' MinHeight='24' ToolTip='打开文件夹，或重新选择弹幕来源'><Button.Style><Style TargetType='Button' BasedOn='{StaticResource TextAction}'><Setter Property='HorizontalContentAlignment' Value='Left'/><Style.Triggers><DataTrigger Binding='{Binding IsFolder}' Value='True'><Setter Property='HorizontalContentAlignment' Value='Center'/></DataTrigger></Style.Triggers></Style></Button.Style></Button></StackPanel></DataTemplate>");
             grid.Columns.Add(new DataGridTemplateColumn { Header = "弹幕", CellTemplate = danmuTemplate, Width = 210, CanUserSort = false });
+            grid.SizeChanged += (s, e) => FitLibraryColumns();
             grid.AddHandler(Button.ClickEvent, new RoutedEventHandler((s, e) => { var button = e.OriginalSource as Button; var row = button == null ? null : button.DataContext as LibraryRow; if (row == null) return; if (row.Entry.IsFolder) OpenFolder(row.Entry); else ShowDanmuMenu(button, row.Entry); e.Handled = true; }));
             grid.SelectionChanged += (s, e) =>
             {
@@ -114,7 +136,7 @@ namespace DanmuCinema.Desktop
             if (grid == null) return;
             renderedEntries = controller.Library.Entries;
             var view = controller.Library.Browse(session.Navigation.Current.Directory, session.Filter, (LibrarySort)session.Sort, session.Order == 1, controller.Settings.MediaFolder);
-            rows = view.Select(x => new LibraryRow(x, controller.Library.Selection)).ToArray();
+            rows = view.Select(x => new LibraryRow(x, controller.Library.Selection, controller)).ToArray();
             foreach (var row in rows) row.Changed += SyncSelection;
             var viewer = Ui.Child<ScrollViewer>(grid); double offset = viewer == null ? 0 : viewer.VerticalOffset;
             synchronizing = true; try { grid.ItemsSource = rows; } finally { synchronizing = false; }
@@ -123,6 +145,7 @@ namespace DanmuCinema.Desktop
             location.ToolTip = location.Text;
             string[] names = { "Name", "Modified", "Size", "Type", "Bitrate" }; foreach (var column in grid.Columns) column.SortDirection = column.SortMemberPath == names[session.Sort] ? (session.Order == 0 ? ListSortDirection.Ascending : ListSortDirection.Descending) : (ListSortDirection?)null;
             SyncSelection();
+            LoadFolderCovers();
         }
         void SyncSelection()
         {
@@ -139,6 +162,7 @@ namespace DanmuCinema.Desktop
                 var keys = rows.SelectMany(x => x.Entry.SelectionKeys).Distinct().ToArray(); int chosen = keys.Count(controller.Library.Selection.Contains);
                 all.IsChecked = chosen == 0 ? false : chosen == keys.Length ? (bool?)true : null;
                 count.Text = "共 " + controller.Library.Entries.Length + " 个影片 · 当前 " + rows.Length + (session.Navigation.Current.Directory == null ? " 个文件夹" : " 个影片") + " · 已选 " + controller.Library.Selection.Count + " 个影片";
+                if (bulkActions != null) SurfaceMotion.SetVisible(bulkActions, controller.Library.Selection.Count > 0);
             }
             finally { synchronizing = false; }
         }
@@ -151,10 +175,31 @@ namespace DanmuCinema.Desktop
         void RestoreLocation() { session.Filter = session.Navigation.Current.Filter; librarySearch.RestoreText(session.Filter); ApplyLibrary(); }
         void ShowDanmuMenu(Button button, LibraryEntry entry)
         {
-            var menu = new ContextMenu { PlacementTarget = button }; var selected = controller.Library.SelectedItems;
-            Action<string, DanmuMatchScope, bool> add = (title, scope, enabled) => { var item = new MenuItem { Header = title, IsEnabled = enabled }; item.Click += (s, e) => Match(scope == DanmuMatchScope.Selection ? selected.FirstOrDefault() : entry.Item, scope, selected); menu.Items.Add(item); };
+            var menu = new ContextMenu { PlacementTarget = button, Style = (Style)Ui.Resource("MediaMenu") }; var selected = controller.Library.SelectedItems;
+            Action<string, DanmuMatchScope, bool> add = (title, scope, enabled) => { var item = new MenuItem { Header = title, Style = (Style)Ui.Resource("MediaMenuItem"), IsEnabled = enabled }; item.Click += (s, e) => Match(scope == DanmuMatchScope.Selection ? selected.FirstOrDefault() : entry.Item, scope, selected); menu.Items.Add(item); };
             add("重新选择单集弹幕来源…", DanmuMatchScope.Single, true); add("重新选择整季弹幕来源…", DanmuMatchScope.Season, entry.Type != "Movie"); add("重新选择已选 " + selected.Length + " 个影片的来源…", DanmuMatchScope.Selection, selected.Length > 1);
             menu.IsOpen = true;
+        }
+        void ShowLibraryActions(Button target, bool selectedOnly)
+        {
+            if (libraryMenu != null) { libraryMenu.IsOpen = false; libraryMenu.Items.Clear(); }
+            libraryMenu = new ContextMenu { PlacementTarget = target, Style = (Style)Ui.Resource("MediaMenu") };
+            Action<string, Action> add = (label, action) => { var item = new MenuItem { Header = label, Style = (Style)Ui.Resource("MediaMenuItem") }; item.Click += (s, e) => action(); libraryMenu.Items.Add(item); };
+            if (selectedOnly)
+            {
+                add("导出 XML", async () => await controller.Execute(ExportXml)); add("影片详情", async () => await controller.Execute(() => { OpenDetails(); return Done(); }));
+                add("复制原始文件名", () => Clipboard.SetText(String.Join(Environment.NewLine, controller.Library.SelectedItems.Select(x => System.IO.Path.GetFileName(Json.Text(x, "Path"))))));
+            }
+            libraryMenu.IsOpen = true;
+        }
+        void FitLibraryColumns()
+        {
+            if (grid == null || grid.Columns.Count < 7) return;
+            bool detail = session.LibraryDetails || grid.ActualWidth >= 1050;
+            grid.Columns[2].Visibility = grid.Columns[5].Visibility = detail ? Visibility.Visible : Visibility.Collapsed;
+            grid.Columns[3].MinWidth = grid.ActualWidth < 850 && !session.LibraryDetails ? 132 : 142;
+            grid.Columns[3].Width = grid.ActualWidth < 850 && !session.LibraryDetails ? 132 : 142;
+            grid.Columns[4].Width = 110; grid.Columns[6].Width = grid.ActualWidth < 850 && !session.LibraryDetails ? 185 : 210;
         }
         internal ContextMenu CreateLibraryContextMenu(LibraryEntry entry)
         {
