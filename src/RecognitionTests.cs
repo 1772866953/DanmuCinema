@@ -44,14 +44,14 @@ namespace DanmuCinema
         sealed class PlayingFixture : HttpMessageHandler
         {
             readonly Dictionary<string, object> item;
-            public int Sessions;
+            public int Sessions, Items;
             public bool Playing = true;
             public PlayingFixture(Dictionary<string, object> item) { this.item = item; }
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
             {
                 cancellation.ThrowIfCancellationRequested(); string content;
                 if (request.RequestUri.AbsolutePath == "/Sessions") { Sessions++; content = Json.Write(new[] { new { NowPlayingItem = Playing ? (object)new { Id = "fixturevideo", Type = "Episode" } : null, Client = "SenPlayer" } }); }
-                else content = Json.Write(item);
+                else { Items++; content = Json.Write(item); }
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(content) });
             }
         }
@@ -90,6 +90,14 @@ namespace DanmuCinema
                 SelfTests.Assert(File.ReadAllText(xml) == "manual selection" && handler.Requests == before, "自动查找保留已有 XML 和用户手动来源", report);
                 File.Delete(xml);
                 var playing = new PlayingFixture(local);
+                using (var playApi = new JellyfinApi(settings, playing)) using (var preparation = new AutomaticDanmu(settings, playApi, catalog, () => false))
+                {
+                    preparation.Start(); int beforeItems = playing.Items;
+                    await Task.WhenAll(Enumerable.Range(0, 4).Select(i => preparation.PrepareForPlayback("fixturevideo", "", CancellationToken.None)));
+                    SelfTests.Assert(File.Exists(xml) && playing.Items == beforeItems + 1 && handler.Requests == before, "并发首播请求合并准备任务，缓存命中时无需接口请求，UI忙碌也可准备", report);
+                    SelfTests.Assert(!await preparation.PrepareForPlayback("../invalid", "", CancellationToken.None), "播放准备拒绝无效影片编号", report);
+                    await preparation.Stop(); File.Delete(xml);
+                }
                 using (var playApi = new JellyfinApi(settings, playing)) using (var monitor = new AutomaticDanmu(settings, playApi, catalog, () => true))
                 {
                     monitor.Start(); int attempts = 0; while (!File.Exists(xml) && attempts++ < 100) await Task.Delay(30); await monitor.Stop();

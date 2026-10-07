@@ -9,6 +9,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Shell;
+using System.ComponentModel;
 
 namespace DanmuCinema.Desktop
 {
@@ -20,7 +21,8 @@ namespace DanmuCinema.Desktop
             Title = title; Width = width; Height = height; MinWidth = 760; MinHeight = 540; WindowStartupLocation = WindowStartupLocation.CenterOwner; WindowStyle = WindowStyle.SingleBorderWindow; ResizeMode = ResizeMode.CanResize;
             Style = (Style)Application.Current.FindResource(typeof(Window));
             WindowChrome.SetWindowChrome(this, new WindowChrome { CaptionHeight = 48, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = new Thickness(0), CornerRadius = new CornerRadius(0), UseAeroCaptionButtons = false });
-            var outer = new Grid(); outer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) }); outer.RowDefinitions.Add(new RowDefinition());
+            ShowInTaskbar = false;
+            var outer = new Grid { Background = (Brush)Ui.Resource("Canvas") }; outer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) }); outer.RowDefinitions.Add(new RowDefinition());
             var atmosphere = Ui.Atmosphere(); Grid.SetRowSpan(atmosphere, 2); outer.Children.Add(atmosphere);
             var header = new Grid { Background = (Brush)Ui.Resource("Surface") }; header.Children.Add(new TextBlock { Text = title, Margin = new Thickness(22, 0, 60, 0), FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap });
             var accent = Ui.AccentLine(); accent.Margin = new Thickness(22, 0, 0, 0); accent.VerticalAlignment = VerticalAlignment.Bottom; header.Children.Add(accent);
@@ -54,7 +56,7 @@ namespace DanmuCinema.Desktop
             // Keep validation above the active child dialog, and tie its lifetime to it.
             var active = Application.Current.Windows.OfType<Window>().LastOrDefault(x => x.IsActive && x.IsVisible);
             var dialog = new AlertWindow(title, message, confirm, acceptLabel, cancelLabel); dialog.Owner = active ?? owner;
-            return dialog.ShowDialog() == true;
+            bool accepted = dialog.ShowDialog() == true; Ui.RepaintOwner(dialog.Owner); return accepted;
         }
     }
     public sealed class SourcesWindow : DialogWindow
@@ -111,6 +113,7 @@ namespace DanmuCinema.Desktop
         public MatchWindow(DesktopController controller, ShellWindow shell, MatchState state, bool autoSearch) : base("选择弹幕来源" + (state.Item == null ? "" : " · " + Json.Text(state.Item, "Name")), 1080, 790)
         {
             this.controller = controller; this.state = state;
+            if (state.Selected == null) state.Selected = new Dictionary<string, object>[0];
             Body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); Body.RowDefinitions.Add(new RowDefinition()); Body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); Body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var choices = new List<Choice> { new Choice { Label = "全部已启用接口（联合搜索）", Data = new Dictionary<string, object> { { "Id", "" } } } };
             choices.AddRange(controller.Gateway.Catalog.SourceChoices().Select(x => new Choice { Data = x, Label = Json.Text(x, "Name") }));
@@ -128,14 +131,20 @@ namespace DanmuCinema.Desktop
             var right = new DockPanel(); var rightLabel = Ui.Text("02  选择对应集数", "Heading"); DockPanel.SetDock(rightLabel, Dock.Top); right.Children.Add(rightLabel); right.Children.Add(episodes);
             columns.Children.Add(left); Grid.SetColumn(right, 2); columns.Children.Add(right); Grid.SetRow(columns, 1); Body.Children.Add(columns);
             var itemTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><TextBlock Text='{Binding Label}' TextWrapping='Wrap'/></DataTemplate>"); sources.ItemTemplate = episodes.ItemTemplate = itemTemplate;
-            sources.SelectionChanged += (s, e) => { if (synchronizing) return; state.SourceIndex = sources.SelectedIndex; state.Episodes = new object[0]; state.EpisodeIndex = -1; Render(); };
-            sources.MouseDoubleClick += async (s, e) => await Work(GetEpisodes);
+            sources.SelectionChanged += async (s, e) => { if (synchronizing) return; state.SourceIndex = sources.SelectedIndex; state.Episodes = new object[0]; state.EpisodeIndex = -1; Render(); if (state.SourceIndex >= 0) await Work(GetEpisodes); };
             episodes.SelectionChanged += (s, e) => { if (!synchronizing) state.EpisodeIndex = episodes.SelectedIndex; };
             scopes = new TabControl { Margin = new Thickness(0, 0, 0, 4) };
             AddScope("单集", DanmuMatchScope.Single, Command("下载并关联单集", Download, true), "只更新当前影片，已有同名 XML 将直接覆盖。");
-            if (state.Item != null && Json.Text(state.Item, "Type") != "Movie") AddScope("整个季度", DanmuMatchScope.Season, Command("预览整季并全部下载", () => DownloadGroup(false), true), "按集号匹配本地整季文件。先预览，无法识别或重复的集数会跳过。");
+            if (state.Item == null || Json.Text(state.Item, "Type") != "Movie") AddScope("整个季度", DanmuMatchScope.Season, Command("预览整季并全部下载", () => DownloadGroup(false), true), "按集号匹配本地整季文件。先预览，无法识别或重复的集数会跳过。");
             if (state.Selected.Length > 1) AddScope("已选 " + state.Selected.Length + " 个影片", DanmuMatchScope.Selection, Command("预览已选影片并下载", () => DownloadGroup(true), true), "只更新已勾选的同番同季影片。");
             foreach (TabItem tab in scopes.Items) if ((DanmuMatchScope)tab.Tag == state.Scope) scopes.SelectedItem = tab;
+            if (state.Item == null)
+            {
+                var targets = controller.Library.Entries.Where(x => x.Type != "Movie").GroupBy(MediaLibrary.DirectoryOf, StringComparer.OrdinalIgnoreCase).Select(x => new Choice { Label = x.Key, Data = x.First().Item }).ToArray();
+                var local = new ComboBox { ItemsSource = targets, SelectedIndex = -1, MinWidth = 350, MaxWidth = 760 };
+                local.SelectionChanged += (s, e) => { var choice = local.SelectedItem as Choice; state.Item = choice == null ? null : choice.Data; };
+                input.Children.Add(Ui.Row(Ui.Label("本地季度"), local)); scopes.SelectedIndex = 1; state.Scope = DanmuMatchScope.Season;
+            }
             scopes.SelectionChanged += (s, e) => { var tab = scopes.SelectedItem as TabItem; if (tab != null) { state.Scope = (DanmuMatchScope)tab.Tag; Ui.Animate((FrameworkElement)tab.Content); } };
             Grid.SetRow(scopes, 2); Body.Children.Add(scopes); status = Ui.Text(state.Status, "Note"); Grid.SetRow(status, 3); Body.Children.Add(status);
             service.SelectionChanged += async (s, e) => { state.ServiceId = service.SelectedItem == null ? null : Json.Text(((Choice)service.SelectedItem).Data, "Id"); if (!closed && IsVisible && !controller.Busy && !String.IsNullOrWhiteSpace(state.Keyword)) await Work(Search); };
@@ -191,6 +200,12 @@ namespace DanmuCinema.Desktop
             state.Sources = result.Animes.Cast<object>().ToArray(); state.SourceIndex = result.Recommended == null ? (result.Animes.Length == 1 ? 0 : -1) : Array.FindIndex(result.Animes, x => Json.Text(x, "Id") == Json.Text(result.Recommended, "AnimeId"));
             state.Episodes = result.Episodes.Where(x => state.SourceIndex >= 0 && Json.Text(x, "AnimeId") == Json.Text(result.Animes[state.SourceIndex], "Id")).Cast<object>().ToArray();
             state.EpisodeIndex = result.Recommended == null ? -1 : Array.FindIndex(state.Episodes, x => Json.Text((Dictionary<string, object>)x, "Id") == Json.Text(result.Recommended, "Id"));
+            if (state.SourceIndex >= 0) await GetEpisodes();
+            if (result.Recommended != null)
+            {
+                int identified = Array.FindIndex(state.Episodes, x => Json.Text((Dictionary<string, object>)x, "Id") == Json.Text(result.Recommended, "Id"));
+                if (identified >= 0) { state.EpisodeIndex = identified; var full = (Dictionary<string, object>)state.Episodes[identified]; full["Shift"] = Json.Text(result.Recommended, "Shift"); full["MatchMethod"] = result.Method; }
+            }
             state.Status = result.Status + " 请核对作品和集数后下载。"; controller.Publish();
         }
         Dictionary<string, object> Source()
@@ -218,16 +233,18 @@ namespace DanmuCinema.Desktop
             if (state.Item == null || Json.Text(state.Item, "Type") == "Movie") throw new InvalidOperationException("整季下载用于本地番剧视频。");
             var source = Source(); if (state.Episodes.Length == 0) await GetEpisodes();
             if (selectedOnly) MediaLibrary.RequireSameSeason(state.Selected);
-            var local = selectedOnly ? state.Selected : await controller.Gateway.Catalog.LocalSeason(state.Item);
+            var local = selectedOnly ? state.Selected : controller.Library.Entries.Select(x => x.Item).Where(x => SmartMatching.SameSeason(state.Item, x)).ToArray();
             var plan = BatchMatching.Plan(local, state.Episodes.Cast<Dictionary<string, object>>()); if (plan.Count == 0) throw new InvalidOperationException("没有找到同季本地视频。");
             controller.BatchPlan = plan; controller.BatchKeep = false; controller.BatchTitle = (selectedOnly ? "已选影片 · " : "整季 · ") + Json.Text(source, "Name") + " · " + Json.Text(source, "Site"); controller.BatchStatus = "可匹配 " + plan.Count(x => x.Selected) + " 集，共 " + plan.Count + " 个本地文件。";
             if (controller.Window != null) controller.Window.ShowBatch();
         }
     }
-    public sealed class BatchRow
+    public sealed class BatchRow : INotifyPropertyChanged
     {
+        public event PropertyChangedEventHandler PropertyChanged;
+        public void Notify() { var handler = PropertyChanged; if (handler != null) handler(this, new PropertyChangedEventArgs(null)); }
         public BatchEntry Entry;
-        public bool Selected { get { return Entry.Selected; } set { Entry.Selected = Entry.Remote != null && value; } }
+        public bool Selected { get { return Entry.Selected; } set { Entry.Selected = Entry.Remote != null && value; Notify(); } }
         public string Number { get { return Entry.Number > 0 ? Entry.Number.ToString() : "?"; } }
         public string Local { get { return Path.GetFileName(Json.Text(Entry.Local, "Path")); } }
         public string Remote { get { return Entry.Remote == null ? "—" : Json.Text(Entry.Remote, "Number") + " " + Json.Text(Entry.Remote, "Title"); } }
@@ -240,6 +257,7 @@ namespace DanmuCinema.Desktop
         readonly TextBlock status;
         readonly CheckBox keep;
         readonly Button start, stop;
+        List<BatchEntry> renderedPlan;
         bool closed;
         public BatchWindow(DesktopController controller) : base("全部下载 · " + controller.BatchTitle, 1080, 680)
         {
@@ -247,7 +265,8 @@ namespace DanmuCinema.Desktop
             Body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); Body.RowDefinitions.Add(new RowDefinition()); Body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); Body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             Body.Children.Add(Ui.Text("请核对下表。按集号关联本地同季文件；无法判断或重复的集数会跳过。", "Note"));
             grid = new DataGrid { ItemsSource = controller.BatchPlan.Select(x => new BatchRow { Entry = x }).ToArray() };
-            grid.Columns.Add(new DataGridCheckBoxColumn { Header = "下载", Binding = new Binding("Selected") { Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged }, Width = 62 });
+            renderedPlan = controller.BatchPlan;
+            grid.Columns.Add(new DataGridTemplateColumn { Header = "下载", CellTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><CheckBox IsChecked='{Binding Selected,Mode=TwoWay,UpdateSourceTrigger=PropertyChanged}' HorizontalAlignment='Center' Margin='0'/></DataTemplate>"), Width = 62 });
             string[] headers = { "集号", "本地文件", "在线集数", "状态" }, properties = { "Number", "Local", "Remote", "Status" }; double[] widths = { 60, 2, 1.6, 1.4 };
             for (int i = 0; i < headers.Length; i++) grid.Columns.Add(new DataGridTextColumn { Header = headers[i], Binding = new Binding(properties[i]), Width = new DataGridLength(widths[i], i == 0 ? DataGridLengthUnitType.Pixel : DataGridLengthUnitType.Star), IsReadOnly = true, MinWidth = i == 0 ? 55 : 130 });
             Grid.SetRow(grid, 1); Body.Children.Add(grid);
@@ -261,6 +280,6 @@ namespace DanmuCinema.Desktop
             controller.Changed += Render; Closed += (s, e) => { closed = true; controller.Changed -= Render; grid.ItemsSource = null; };
             Render();
         }
-        void Render() { if (closed) return; grid.IsEnabled = keep.IsEnabled = start.IsEnabled = !controller.BatchRunning && !controller.Busy; stop.IsEnabled = controller.BatchRunning; status.Text = controller.BatchStatus; if (!grid.IsKeyboardFocusWithin || controller.BatchRunning) grid.Items.Refresh(); }
+        void Render() { if (closed) return; if (!Object.ReferenceEquals(renderedPlan, controller.BatchPlan)) { renderedPlan = controller.BatchPlan; grid.ItemsSource = renderedPlan.Select(x => new BatchRow { Entry = x }).ToArray(); Title = "全部下载 · " + controller.BatchTitle; } grid.IsEnabled = keep.IsEnabled = start.IsEnabled = !controller.BatchRunning && !controller.Busy; stop.IsEnabled = controller.BatchRunning; status.Text = controller.BatchStatus; foreach (BatchRow row in grid.Items) row.Notify(); }
     }
 }

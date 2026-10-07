@@ -66,6 +66,25 @@ namespace DanmuCinema
             if (source != null && !String.IsNullOrEmpty(Json.Text(source, "Path"))) item["Path"] = Json.Text(source, "Path");
             await PrepareItem(item, cancellation).ConfigureAwait(false);
         }
+        public async Task<bool> PrepareForPlayback(string id, string sourceId, CancellationToken cancellation)
+        {
+            if (!Regex.IsMatch(id ?? "", "^[a-zA-Z0-9]{1,64}$")) return false;
+            Task job;
+            lock (sync)
+            {
+                if (timer == null || suppressed.Contains(id) || String.IsNullOrEmpty(api.Token) || String.IsNullOrEmpty(settings.UserId)) return false;
+                if (!jobs.TryGetValue(id, out job))
+                {
+                    DateTime last; if (attempts.TryGetValue(id, out last) && DateTime.UtcNow - last < TimeSpan.FromMinutes(10)) return false;
+                    attempts[id] = DateTime.UtcNow;
+                    var lifetime = stopping.Token;
+                    job = Task.Run(async () => { try { await serial.WaitAsync(lifetime).ConfigureAwait(false); try { await Prepare(id, sourceId, lifetime).ConfigureAwait(false); } finally { serial.Release(); } } catch (OperationCanceledException) { } catch { Log.Write("播放前弹幕准备未完成，继续正常播放。"); } }); jobs[id] = job;
+                }
+            }
+            var cancelled = Task.Delay(Timeout.Infinite, cancellation);
+            if (await Task.WhenAny(job, cancelled).ConfigureAwait(false) != job) cancellation.ThrowIfCancellationRequested();
+            await job.ConfigureAwait(false); return true;
+        }
         public async Task<bool> PrepareItem(Dictionary<string, object> item, CancellationToken cancellation)
         {
             string video = Json.Text(item, "Path"); if (!File.Exists(video)) return false;

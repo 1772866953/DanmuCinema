@@ -20,8 +20,21 @@ namespace DanmuCinema.Desktop
     public static class Ui
     {
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
+        [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+        [DllImport("user32.dll")] static extern bool RedrawWindow(IntPtr window, IntPtr rect, IntPtr region, uint flags);
+        public static void RepaintOwner(Window owner)
+        {
+            if (owner == null || !owner.IsVisible || owner.WindowState == WindowState.Minimized) return;
+            var handle = new WindowInteropHelper(owner).Handle;
+            // Repaint the owner after native chrome/activation transitions, retaining
+            // its placement and the other application's foreground focus.
+            SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, 0x1 | 0x2 | 0x4 | 0x10 | 0x40);
+            owner.InvalidateVisual(); RedrawWindow(handle, IntPtr.Zero, IntPtr.Zero, 0x1 | 0x100 | 0x400);
+        }
         public static bool EnableWindowTransitions(Window window)
         {
+            var source = PresentationSource.FromVisual(window) as HwndSource;
+            if (source != null) source.CompositionTarget.BackgroundColor = ((SolidColorBrush)Resource("Canvas")).Color;
             // Keep the system's animation policy; only remove our window's opt-out.
             if (!SystemParameters.MinimizeAnimation) return true;
             try { int disabled = 0; return DwmSetWindowAttribute(new WindowInteropHelper(window).Handle, 3, ref disabled, sizeof(int)) == 0; } catch (DllNotFoundException) { return false; }
@@ -85,8 +98,12 @@ namespace DanmuCinema.Desktop
         public static Grid Atmosphere()
         {
             var background = new Grid { IsHitTestVisible = false, ClipToBounds = true };
-            background.Children.Add(new System.Windows.Shapes.Ellipse { Width = 320, Height = 220, Fill = Brush("#244D659F"), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -100, -80, 0), Effect = new System.Windows.Media.Effects.BlurEffect { Radius = 65 } });
-            background.Children.Add(new System.Windows.Shapes.Ellipse { Width = 250, Height = 220, Fill = Brush("#183A9FAD"), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(-80, 0, 0, -90), Effect = new System.Windows.Media.Effects.BlurEffect { Radius = 60 } }); return background;
+            // Soft radial colors preserve the glow without allocating an effect render
+            // target on each owned window activation or resize.
+            var blue = new RadialGradientBrush(Color.FromArgb(36, 77, 101, 159), Colors.Transparent); blue.Freeze();
+            var teal = new RadialGradientBrush(Color.FromArgb(24, 58, 159, 173), Colors.Transparent); teal.Freeze();
+            background.Children.Add(new System.Windows.Shapes.Ellipse { Width = 500, Height = 380, Fill = blue, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, -160, -130, 0) });
+            background.Children.Add(new System.Windows.Shapes.Ellipse { Width = 410, Height = 380, Fill = teal, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(-140, 0, 0, -150) }); return background;
         }
         public static void StopAnimations(DependencyObject root)
         {

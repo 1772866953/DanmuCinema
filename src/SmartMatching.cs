@@ -30,7 +30,14 @@ namespace DanmuCinema
         }
         public static int Episode(Dictionary<string, object> item)
         {
-            int number = Number(Json.Text(item, "IndexNumber")); if (number > 0) return number;
+            int number;
+            // A trailing episode number is more reliable than scraper metadata for
+            // releases such as "Hyakkano - 25 (1)" through "Hyakkano - 25 (12)".
+            string filename = Path.GetFileNameWithoutExtension(Json.Text(item, "Path")) ?? "";
+            if (Regex.IsMatch(filename, @"\b(?:SP\s*\d*|OVA|OAD|NCOP|NCED)\b|特别篇|特別篇|E\d+\s*[-~]\s*E?\d+", RegexOptions.IgnoreCase)) return 0;
+            var trailing = Regex.Match(filename, @"[（(](\d{1,3})[)）]\s*$");
+            if (trailing.Success) return Number(trailing.Groups[1].Value);
+            number = Number(Json.Text(item, "IndexNumber")); if (number > 0) return number;
             foreach (string value in new[] { Path.GetFileNameWithoutExtension(Json.Text(item, "Path")) ?? "", Json.Text(item, "Name") })
             {
                 if (Regex.IsMatch(value, @"(?:E\d+\s*[-~]\s*E?\d+|\d+\s*[-~]\s*\d+|SP\s*\d*|OVA|OAD|特别篇|特別篇)", RegexOptions.IgnoreCase)) continue;

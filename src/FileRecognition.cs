@@ -47,7 +47,7 @@ namespace DanmuCinema
                     return new VideoFeature { Hash = BitConverter.ToString(md5.Hash).Replace("-", "").ToLowerInvariant(), Length = length, WriteTicks = ticks, FileName = Path.GetFileNameWithoutExtension(file.Name) };
                 }
             }, cancellation).ConfigureAwait(false);
-            cancellation.ThrowIfCancellationRequested(); Cache.Write(key, "hash", Path.GetFileName(video), Json.Write(result)); return result;
+            cancellation.ThrowIfCancellationRequested(); Cache.Write(key, "hash", Path.GetFileName(video), Json.Write(result), SmartMatching.CleanTitle(Path.GetFileNameWithoutExtension(video))); return result;
         }
         public async Task<FileRecognition> IdentifyFile(Dictionary<string, object> item, CancellationToken cancellation)
         {
@@ -58,10 +58,13 @@ namespace DanmuCinema
             int duration = (int)Math.Min(Int32.MaxValue, Math.Max(0, runtime / TimeSpan.TicksPerSecond));
             var hashResponse = Json.Object(await Fetch(provider, "/api/v2/match", new { fileName = feature.FileName, fileHash = feature.Hash, fileSize = feature.Length, videoDuration = duration, matchMode = "hashOnly" }, cancellation).ConfigureAwait(false));
             var hashRows = Json.Array(hashResponse, "Matches").OfType<Dictionary<string, object>>().ToArray();
+            if (hashRows.Length == 1) Cache.SetAnime(DandanApiCache.Key("hash16m|" + Path.GetFullPath(Json.Text(item, "Path")).ToUpperInvariant() + "|" + feature.Length + "|" + feature.WriteTicks), Json.Text(hashRows[0], "AnimeTitle"));
             if (Json.Text(hashResponse, "IsMatched") == "True" && hashRows.Length == 1)
                 return Recognized(provider, hashRows, item, true);
             var named = Json.Object(await Fetch(provider, "/api/v2/match", new { fileName = feature.FileName, fileHash = feature.Hash, fileSize = feature.Length, videoDuration = duration, matchMode = "fileNameOnly" }, cancellation).ConfigureAwait(false));
-            return Recognized(provider, Json.Array(named, "Matches").OfType<Dictionary<string, object>>().ToArray(), item, false);
+            var namedRows = Json.Array(named, "Matches").OfType<Dictionary<string, object>>().ToArray();
+            if (namedRows.Length == 1) Cache.SetAnime(DandanApiCache.Key("hash16m|" + Path.GetFullPath(Json.Text(item, "Path")).ToUpperInvariant() + "|" + feature.Length + "|" + feature.WriteTicks), Json.Text(namedRows[0], "AnimeTitle"));
+            return Recognized(provider, namedRows, item, false);
         }
         FileRecognition Recognized(Provider provider, Dictionary<string, object>[] rows, Dictionary<string, object> local, bool hashMatched)
         {

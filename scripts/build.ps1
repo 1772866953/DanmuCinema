@@ -20,6 +20,7 @@ $xamlResources = Get-ChildItem -LiteralPath (Join-Path $projectRoot 'desktop') -
 & $compiler /nologo /target:winexe /platform:x64 /optimize+ /codepage:65001 /utf8output "/out:$output" "/win32icon:$icon" "/resource:$icon,DanmuCinema.AppIcon" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Net.Http.dll /reference:System.Web.dll /reference:System.Web.Extensions.dll /reference:System.Security.dll /reference:System.Xml.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll $wpfReferences $xamlResources $sources
 if ($LASTEXITCODE -ne 0) { throw '编译失败。' }
 Copy-Item -LiteralPath (Join-Path $projectRoot 'src\DanmuCinema.exe.config') -Destination ($output + '.config') -Force
+if (Test-Path -LiteralPath (Join-Path $projectRoot 'runtime\jellyfin\MediaBrowser.Controller.dll')) { & (Join-Path $PSScriptRoot 'build-playback-plugin.ps1') }
 & (Join-Path $PSScriptRoot 'create-shortcuts.ps1')
 Write-Output "构建完成：$output"
 if ($Test) {

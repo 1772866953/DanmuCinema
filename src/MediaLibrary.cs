@@ -109,11 +109,22 @@ namespace DanmuCinema
             try { return String.IsNullOrWhiteSpace(path) ? "" : Path.GetDirectoryName(Path.GetFullPath(path)); }
             catch (ArgumentException) { return ""; }
         }
-        public LibraryEntry[] Browse(string directory, string filter, LibrarySort sort, bool descending)
+        public LibraryEntry[] Browse(string directory, string filter, LibrarySort sort, bool descending, string mediaRoot = null)
         {
-            var entries = Entries.Where(x => MediaNames.Matches(x.Item, filter));
-            if (directory != null) return Sort(entries.Where(x => String.Equals(DirectoryOf(x), directory, StringComparison.OrdinalIgnoreCase)), sort, descending);
-            var folders = entries.GroupBy(DirectoryOf, StringComparer.OrdinalIgnoreCase).Select(group => {
+            var entries = Entries.Where(x => MediaNames.Matches(x.Item, filter)).ToArray();
+            var directories = Entries.Select(DirectoryOf).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            Func<LibraryEntry, string> folder = entry => {
+                string parent = DirectoryOf(entry);
+                if (directory != null)
+                {
+                    if (!Below(parent, directory)) return null;
+                    return Path.Combine(directory, parent.Substring(directory.TrimEnd('\\').Length + 1).Split('\\')[0]);
+                }
+                if (!String.IsNullOrEmpty(mediaRoot) && Below(parent, mediaRoot))
+                    return Path.Combine(mediaRoot, parent.Substring(mediaRoot.TrimEnd('\\').Length + 1).Split('\\')[0]);
+                return directories.Where(x => String.Equals(parent, x, StringComparison.OrdinalIgnoreCase) || Below(parent, x)).OrderBy(x => x.Length).First();
+            };
+            var folders = entries.Where(x => folder(x) != null).GroupBy(folder, StringComparer.OrdinalIgnoreCase).Select(group => {
                 var files = group.ToArray();
                 string name = group.Key == "" ? "未分类影片" : Path.GetFileName(group.Key.TrimEnd(Path.DirectorySeparatorChar));
                 if (String.IsNullOrEmpty(name)) name = group.Key;
@@ -122,8 +133,10 @@ namespace DanmuCinema
                     Size = files.All(x => x.Size.HasValue) ? (long?)files.Sum(x => x.Size.Value) : null,
                     ModifiedUtc = files.Max(x => x.ModifiedUtc), SourceLabel = "" };
             });
-            return Sort(folders, sort, descending);
+            IEnumerable<LibraryEntry> direct = directory == null ? new LibraryEntry[0] : entries.Where(x => String.Equals(DirectoryOf(x), directory, StringComparison.OrdinalIgnoreCase));
+            return Sort(folders.Concat(direct), sort, descending);
         }
+        static bool Below(string path, string parent) { return !String.IsNullOrEmpty(parent) && path.StartsWith(parent.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase); }
         static LibraryEntry[] Sort(IEnumerable<LibraryEntry> entries, LibrarySort sort, bool descending)
         {
             // Compare numeric filename segments so episode (2) precedes episode (10).

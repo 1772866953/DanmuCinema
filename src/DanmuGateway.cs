@@ -19,6 +19,8 @@ namespace DanmuCinema
         readonly HttpClient upstream = new HttpClient(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false });
         readonly JellyfinApi catalogApi;
         public readonly DanmuCatalog Catalog;
+        public Func<string, string, CancellationToken, Task<bool>> PreparePlayback;
+        string bridgeKey;
         TcpListener listener;
         CancellationTokenSource stopping;
         Task accepting;
@@ -39,6 +41,15 @@ namespace DanmuCinema
             }
             var candidate = new TcpListener(IPAddress.Any, settings.DanmuPort);
             candidate.Start(32);
+            bridgeKey = Guid.NewGuid().ToString("N");
+            try
+            {
+                Directory.CreateDirectory(Paths.Data);
+                for (int attempt = 0; ; attempt++)
+                    try { SettingsStore.AtomicWrite(Path.Combine(Paths.Data, "playback-bridge.json"), Json.Write(new { Port = settings.DanmuPort, Key = bridgeKey }), false); break; }
+                    catch (IOException) { if (attempt >= 4) throw; Thread.Sleep(50); }
+            }
+            catch { candidate.Stop(); throw; }
             listener = candidate;
             stopping = new CancellationTokenSource();
             accepting = AcceptLoop(candidate, stopping.Token);
@@ -77,6 +88,15 @@ namespace DanmuCinema
                     {
                         await Reply(stream, 200, "application/json; charset=utf-8", Encoding.UTF8.GetBytes("{\"service\":\"DanmuCinema\",\"status\":\"running\"}"), timeout.Token);
                         return;
+                    }
+                    if (first[1].StartsWith("/playback/", StringComparison.Ordinal))
+                    {
+                        var target = new Uri("http://localhost" + first[1]); var query = System.Web.HttpUtility.ParseQueryString(target.Query);
+                        string id = target.AbsolutePath.Substring(10);
+                        if (!IPAddress.IsLoopback(endpoint.Address) || query["key"] != bridgeKey) { await Reply(stream, 403, "application/json", Encoding.UTF8.GetBytes("{}"), timeout.Token); return; }
+                        if (!Regex.IsMatch(id, "^[a-zA-Z0-9]{1,64}$")) { await Reply(stream, 400, "application/json", Encoding.UTF8.GetBytes("{}"), timeout.Token); return; }
+                        bool completed = PreparePlayback != null && await PreparePlayback(id, query["source"], timeout.Token);
+                        await Reply(stream, 200, "application/json", Encoding.UTF8.GetBytes(Json.Write(new { completed = completed })), timeout.Token); return;
                     }
                     string route;
                     int validation = ValidateRoute(first[1], Key, out route);

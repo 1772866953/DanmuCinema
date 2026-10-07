@@ -64,12 +64,13 @@ namespace DanmuCinema.Desktop
         CancellationTokenSource batchCancellation;
         bool checking, disposed, warningShown, awakeHeld;
         DateTime lastLibraryAttempt, lastLibraryRefresh;
-        public DesktopController(Application application, AppSettings settings, bool infrastructure = true)
+        public DesktopController(Application application, AppSettings settings, bool infrastructure = true, DanmuCatalog catalog = null)
         {
             this.application = application; Settings = settings;
-            Services = new ServiceManager(settings); Gateway = new DanmuGateway(settings);
+            Services = new ServiceManager(settings); Gateway = new DanmuGateway(settings, catalog);
             Automatic = new AutomaticDanmu(settings, Services.Api, Gateway.Catalog, () => Services.OwnsProcess && !Services.Transitioning && !Closing && !Busy && !BatchRunning);
             Automatic.Saved += AutoSaved;
+            Gateway.PreparePlayback = Automatic.PrepareForPlayback;
             statusTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(30) };
             statusTimer.Tick += StatusTick;
             scheduleTimer = new DispatcherTimer(DispatcherPriority.Normal) { Interval = TimeSpan.FromMilliseconds(250) };

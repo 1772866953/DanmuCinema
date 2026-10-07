@@ -57,8 +57,7 @@ namespace DanmuCinema.Desktop
             sort.SelectionChanged += (s, e) => { session.Sort = sort.SelectedIndex; ApplyLibrary(); }; order.SelectionChanged += (s, e) => { session.Order = order.SelectedIndex; ApplyLibrary(); };
             location = Ui.Text("", "Note"); count = Ui.Text("", "Note");
             var breadcrumb = new DockPanel();
-            var browseButtons = Ui.Row(Ui.Button("←", () => NavigateHistory(false)), Ui.Button("→", () => NavigateHistory(true)), Ui.Button("返回文件夹", () => { session.Navigation.UpdateFilter(session.Filter); if (session.Navigation.Visit(null, "")) RestoreLocation(); }));
-            DockPanel.SetDock(browseButtons, Dock.Left); breadcrumb.Children.Add(browseButtons); breadcrumb.Children.Add(location);
+            breadcrumb.Children.Add(location);
             var top = Ui.Stack(Ui.Row(librarySearch, Ui.Button("清除筛选", () => librarySearch.Editor.Clear()), Command("刷新列表", controller.LoadLibrary, true), Command("扫描媒体库", controller.ScanLibrary)),
                 Ui.Row(Ui.Label("排序"), sort, order, Ui.Button("取消全部选择", () => { controller.Library.Selection.Clear(); SyncSelection(); })),
                 breadcrumb,
@@ -105,6 +104,7 @@ namespace DanmuCinema.Desktop
             grid.MouseDoubleClick += (s, e) => { var row = Ui.Ancestor<DataGridRow>(e.OriginalSource as DependencyObject); if (row == null || Ui.Ancestor<Button>(e.OriginalSource as DependencyObject) != null || Ui.Ancestor<CheckBox>(e.OriginalSource as DependencyObject) != null) return; var entry = ((LibraryRow)row.Item).Entry; if (entry.IsFolder) OpenFolder(entry); else DesktopController.Open(controller.LocalUrl + "/web/#!/details?id=" + Uri.EscapeDataString(Json.Text(entry.Item, "Id"))); };
             var overlay = new Grid(); overlay.Children.Add(grid); selectionCanvas = new Canvas { IsHitTestVisible = false }; selectionBox = new Rectangle { Fill = Ui.Brush("#209DABFF"), Stroke = Ui.Brush("#709DABFF"), StrokeThickness = 1, RadiusX = 4, RadiusY = 4, Visibility = Visibility.Collapsed }; selectionCanvas.Children.Add(selectionBox); overlay.Children.Add(selectionCanvas);
             var border = new Border { CornerRadius = new CornerRadius(12), BorderBrush = (Brush)Ui.Resource("Line"), BorderThickness = new Thickness(1), ClipToBounds = true, Child = overlay }; Grid.SetRow(border, 1); panel.Children.Add(border);
+            border.SizeChanged += (s, e) => border.Clip = new RectangleGeometry(new Rect(0, 0, border.ActualWidth, border.ActualHeight), 12, 12);
             var hint = Ui.Text("点击文件夹进入列表；支持复选框、全选、Ctrl / Shift 多选与拖动圈选。右键可删除文件夹、视频或弹幕。鼠标侧键和 Alt + 方向键可前进 / 后退。", "Note"); hint.FontSize = 11; Grid.SetRow(hint, 2); panel.Children.Add(hint);
             grid.Loaded += (s, e) => { double offset; var viewer = Ui.Child<ScrollViewer>(grid); if (viewer != null && session.ScrollOffsets.TryGetValue("library-grid", out offset)) viewer.ScrollToVerticalOffset(offset); };
             ApplyLibrary(); return panel;
@@ -113,7 +113,7 @@ namespace DanmuCinema.Desktop
         {
             if (grid == null) return;
             renderedEntries = controller.Library.Entries;
-            var view = controller.Library.Browse(session.Navigation.Current.Directory, session.Filter, (LibrarySort)session.Sort, session.Order == 1);
+            var view = controller.Library.Browse(session.Navigation.Current.Directory, session.Filter, (LibrarySort)session.Sort, session.Order == 1, controller.Settings.MediaFolder);
             rows = view.Select(x => new LibraryRow(x, controller.Library.Selection)).ToArray();
             foreach (var row in rows) row.Changed += SyncSelection;
             var viewer = Ui.Child<ScrollViewer>(grid); double offset = viewer == null ? 0 : viewer.VerticalOffset;

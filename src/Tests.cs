@@ -99,7 +99,9 @@ namespace DanmuCinema
                 File.WriteAllText(Path.Combine(media, filename + ".xml"), sampleXml, new UTF8Encoding(false));
                 string plugin = Path.Combine(Paths.ServerData, "plugins", "Danmu_2.8.0.0"); Directory.CreateDirectory(plugin);
                 File.Copy(Path.Combine(originalRoot, "data", "jellyfin", "plugins", "Danmu_2.8.0.0", "Jellyfin.Plugin.Danmu.dll"), Path.Combine(plugin, "Jellyfin.Plugin.Danmu.dll"));
-                var settings = new AppSettings { Port = FreePort(), DanmuPort = FreePort(), MediaFolder = media };
+                string playbackPlugin = Path.Combine(Paths.ServerData, "plugins", "DanmuCinemaPlayback_1.0.0.0"); Directory.CreateDirectory(playbackPlugin);
+                foreach (string name in new[] { "DanmuCinema.Playback.dll", "meta.json" }) File.Copy(Path.Combine(originalRoot, "bin", "playback-plugin", name), Path.Combine(playbackPlugin, name));
+                var settings = new AppSettings { Port = FreePort(), DanmuPort = FreePort(), MediaFolder = media, EnableDandan = false, EnableAnimeko = false, EnableBahamut = false };
                 while (settings.Port == settings.DanmuPort) settings.DanmuPort = FreePort();
                 SettingsStore.Save(settings);
                 manager = new ServiceManager(settings);
@@ -115,6 +117,7 @@ namespace DanmuCinema
                 var plugins = await manager.Api.Plugins();
                 var installed = plugins.Cast<Dictionary<string, object>>().FirstOrDefault(x => Json.Text(x, "Name") == "Danmu");
                 SelfTests.Assert(installed != null && Json.Text(installed, "Status") == "Active", "Danmu 插件已实际加载为 Active", report);
+                SelfTests.Assert(plugins.Cast<Dictionary<string, object>>().Any(x => Json.Text(x, "Name") == "DanmuCinema Playback" && Json.Text(x, "Status") == "Active"), "播放前准备插件在真实 Jellyfin 中加载为 Active", report);
                 await manager.Api.AddLibrary(media, "Integration", "movies");
                 object[] items = new object[0];
                 for (int attempt = 0; attempt < 40; attempt++)
@@ -131,8 +134,26 @@ namespace DanmuCinema
                 var folders = library.Browse(null, "", LibrarySort.Name, false);
                 SelfTests.Assert(folders.Length == 1 && folders[0].IsFolder && library.Browse(folders[0].FolderPath, "", LibrarySort.Name, false).Any(x => x.HasXml), "真实媒体库默认展示目录，进入文件夹才列出完整影片", report);
                 string itemId = Json.Text((Dictionary<string, object>)items[0], "Id");
+                int preparations = 0; string sidecar = Path.Combine(media, filename + ".xml");
+                gateway = new DanmuGateway(settings);
+                gateway.PreparePlayback = async (id, source, cancellation) => { if (id != itemId) throw new Exception("Unexpected preparation ID"); Interlocked.Increment(ref preparations); await Task.Delay(150, cancellation); SettingsStore.AtomicWrite(sidecar, sampleXml, false); return true; };
+                gateway.Start(); File.Delete(sidecar);
+                string metadata = await manager.Api.Request("GET", "api/danmu/" + itemId, null, true);
+                SelfTests.Assert(preparations == 1 && File.Exists(sidecar) && !String.IsNullOrEmpty(Json.Text(Json.Object(metadata), "Url")), "首次请求弹幕信息先等待旁挂 XML 完成，再返回可用地址", report);
                 string xml = await manager.Api.Request("GET", "api/danmu/" + itemId + "/raw", null, true);
                 SelfTests.Assert(xml.Contains("测试弹幕"), "插件 raw 接口读取同名 XML 弹幕", report);
+                File.Delete(sidecar); int previous = preparations;
+                string info = await manager.Api.Request("POST", "Items/" + itemId + "/PlaybackInfo?UserId=" + settings.UserId, new { UserId = settings.UserId }, true);
+                SelfTests.Assert(preparations == previous + 1 && File.Exists(sidecar) && Json.Array(Json.Object(info), "MediaSources").Length > 0, "Jellyfin 播放信息返回前等待当前视频的弹幕完成", report);
+                using (var anonymous = new HttpClient(new HttpClientHandler { UseProxy = false }))
+                {
+                    previous = preparations;
+                    using (var denied = await anonymous.GetAsync("http://127.0.0.1:" + settings.Port + "/Items/" + itemId + "/PlaybackInfo")) SelfTests.Assert(denied.StatusCode == HttpStatusCode.Unauthorized && preparations == previous, "未授权播放请求不触发弹幕准备", report);
+                    using (var denied = await anonymous.GetAsync("http://127.0.0.1:" + settings.DanmuPort + "/playback/" + itemId + "?key=wrong")) SelfTests.Assert(denied.StatusCode == HttpStatusCode.Forbidden && preparations == previous, "本机播放桥拒绝错误密钥", report);
+                }
+                var prepareHandler = gateway.PreparePlayback; gateway.PreparePlayback = null;
+                info = await manager.Api.Request("GET", "Items/" + itemId + "/PlaybackInfo?UserId=" + settings.UserId, null, true);
+                SelfTests.Assert(Json.Array(Json.Object(info), "MediaSources").Length > 0, "弹幕准备不可用时仍返回正常播放信息", report); gateway.PreparePlayback = prepareHandler;
                 var duplicateBlocked = false;
                 try { await manager.Api.AddLibrary(media, "Another", "movies"); } catch (InvalidOperationException) { duplicateBlocked = true; }
                 SelfTests.Assert(duplicateBlocked, "同一媒体路径重复添加被阻止", report);
@@ -147,7 +168,7 @@ namespace DanmuCinema
                         SelfTests.Assert(response.StatusCode == HttpStatusCode.PartialContent && bytes.Length == 128, "视频直传 HTTP Range 正确返回 206 与请求的 128 字节", report);
                     }
                 }
-                gateway = new DanmuGateway(settings); gateway.Start();
+                SelfTests.Assert(preparations == previous, "视频直传请求不调用弹幕准备桥", report);
                 using (var client = new HttpClient(new HttpClientHandler { UseProxy = false }))
                 {
                     string baseUrl = "http://127.0.0.1:" + settings.DanmuPort;

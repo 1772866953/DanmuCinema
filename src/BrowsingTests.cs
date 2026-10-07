@@ -51,6 +51,11 @@ namespace DanmuCinema
             SelfTests.Assert(model.Browse(null, "(2)", LibrarySort.Name, false).Single().SelectionKeys.SequenceEqual(new[] { "id:2" }), "根目录筛选显示匹配文件所在目录，文件夹勾选只包含匹配影片", report);
             var duplicate = new MediaLibrary(); duplicate.Replace(new[] { Video(1, Path.Combine(first, "a.mkv")), Video(2, Path.Combine(root, "another", "Show2", "b.mkv")) });
             SelfTests.Assert(duplicate.Browse(null, "", LibrarySort.Name, false).Length == 2, "不同路径的同名文件夹不会合并", report);
+            var nested = new MediaLibrary(); nested.Replace(new[] { Video(1, Path.Combine(first, "a.mkv")), Video(2, Path.Combine(first, "SPs", "special.mkv")), Video(3, Path.Combine(second, "season", "b.mkv")) });
+            SelfTests.Assert(nested.Browse(null, "", LibrarySort.Name, false, root).Select(x => x.Name).SequenceEqual(new[] { "Show2", "Show10" }) && nested.Browse(first, "", LibrarySort.Name, false, root).Any(x => x.IsFolder && x.Name == "SPs"), "根层只显示直属动漫文件夹，SPs 和季度文件夹保留真实层级", report);
+            SelfTests.Assert(nested.Browse(null, "special", LibrarySort.Name, false, root).Single().Name == "Show2", "搜索子文件时仍保留父动漫层级", report);
+            SelfTests.Assert(Enumerable.Range(1, 12).Select(i => SmartMatching.Episode(new Dictionary<string, object> { { "Path", "Hyakkano - 25 (" + i + ").mkv" }, { "IndexNumber", 25 } })).SequenceEqual(Enumerable.Range(1, 12)), "括号集号优先于错误的固定第25集媒体元数据，完整12集可分别匹配", report);
+            SelfTests.Assert(SmartMatching.Episode(new Dictionary<string, object> { { "Path", "番剧 SP (1).mkv" }, { "IndexNumber", 1 } }) == 0, "特别篇即使有括号和元数据集号也不混入普通整季匹配", report);
             SearchHistory.Add("history-test", "first"); SearchHistory.Add("history-test", "second"); SearchHistory.Add("history-test", "FIRST");
             SelfTests.Assert(SearchHistory.List("history-test").SequenceEqual(new[] { "FIRST", "second" }), "搜索历史持久化、去重且最近使用排在顶部", report);
             SearchHistory.Add("history-other", "other"); SearchHistory.Remove("history-test", "first");

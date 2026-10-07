@@ -9,6 +9,8 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Runtime.InteropServices;
+using System.Net;
+using System.Net.Http;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
@@ -18,6 +20,7 @@ namespace DanmuCinema.Desktop
     public static class DesktopTests
     {
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+        [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
         public static int Run()
         {
             // All settings, geometry, histories and screenshots stay in a disposable fixture.
@@ -65,6 +68,7 @@ namespace DanmuCinema.Desktop
                 TestLibraryControls(controller, report);
                 TestDeletionControls(controller, report, output);
                 TestDialogs(controller, report, output);
+                TestSeasonMatching(application, controller, report);
                 TestBackgroundBatch(controller, report);
                 controller.ReleaseWindow(); Pump(); controller.Dispose();
                 controller = new DesktopController(application, new AppSettings(), false); controller.ShowWindow(); Pump();
@@ -189,7 +193,69 @@ namespace DanmuCinema.Desktop
             controller.ReleaseWindow(); Pump(); Assert(Application.Current.Windows.Count == 0 && controller.Session.Match.Open, "托盘同时释放弹窗且保留匹配状态", report);
             controller.ShowWindow(); Pump(); Assert(Application.Current.Windows.OfType<MatchWindow>().Count() == 1, "恢复时重建匹配弹窗和候选状态", report);
             foreach (var dialog in Application.Current.Windows.OfType<DialogWindow>().ToArray()) dialog.Close(); Pump();
+            foreach (var state in new[] { WindowState.Normal, WindowState.Maximized })
+            {
+                controller.Window.View.WindowState = state; Pump();
+                foreach (int i in Enumerable.Range(0, 3))
+                {
+                    var child = new SourcesWindow(controller); controller.Window.Track(child); Pump();
+                    using (var other = new System.Windows.Forms.Form { Text = "Isolated activation fixture", Width = 180, Height = 100 })
+                    { other.Show(); other.Activate(); Pump(); controller.Window.View.Activate(); child.Activate(); Pump(); child.Close(); Pump(); }
+                    Assert(controller.Window != null && controller.Window.View.IsVisible && IsWindowVisible(new WindowInteropHelper(controller.Window.View).Handle), "切换其他窗口后关闭子窗口保留主窗口：" + state + " " + i, report);
+                }
+            }
+            controller.Window.View.WindowState = WindowState.Normal;
             controller.Window.View.Width = 1080; controller.Window.View.Height = 750;
+        }
+        sealed class SeasonFixture : HttpMessageHandler
+        {
+            public int Matches, Details;
+            protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+            {
+                await Task.Delay(10, token); string content;
+                if (request.RequestUri.AbsolutePath.EndsWith("match")) { Matches++; content = "{\"success\":true,\"isMatched\":true,\"matches\":[{\"animeId\":10,\"episodeId\":101,\"animeTitle\":\"测试番剧 第三季\",\"episodeTitle\":\"第1话\"}]}"; }
+                else if (request.RequestUri.AbsolutePath.Contains("bangumi")) { Details++; content = Json.Write(new { success = true, bangumi = new { animeTitle = "测试番剧 第三季", episodes = Enumerable.Range(1, 12).Select(i => new { episodeId = 100 + i, episodeNumber = i, episodeTitle = "第" + i + "话" }).ToArray() } }); }
+                else content = "{\"success\":true,\"animes\":[{\"animeId\":10,\"animeTitle\":\"测试番剧 第三季\",\"typeDescription\":\"动漫\"}]}";
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(content) };
+            }
+        }
+        static void WaitIdle(DesktopController controller)
+        { int attempts = 0; while (controller.Busy && attempts++ < 40) Settle(); if (controller.Busy) throw new TimeoutException("匹配测试未完成"); Pump(); }
+        static void TestSeasonMatching(Application app, DesktopController original, List<string> report)
+        {
+            var settings = new AppSettings { EnableExistingDanmu = false, EnableAnimeko = false, EnableBahamut = false, MediaFolder = Path.Combine(Paths.Root, "season-fixture") };
+            Directory.CreateDirectory(settings.MediaFolder);
+            Directory.CreateDirectory(Path.GetDirectoryName(DandanConfig.FilePath));
+            SettingsStore.AtomicWrite(DandanConfig.FilePath, Json.Write(new DandanConfig { AppId = "fixture-app", EncryptedAppSecret = SettingsStore.Protect("fixture-secret") }), false);
+            var files = Enumerable.Range(1, 12).Select(i => { string path = Path.Combine(settings.MediaFolder, "Hyakkano - 25 (" + i + ").mkv"); File.WriteAllText(path, "synthetic episode " + i); return new Dictionary<string, object> { { "Id", "fixture" + i }, { "Path", path }, { "Name", "测试番剧 第三季" }, { "Type", "Episode" }, { "IndexNumber", 25 }, { "ParentIndexNumber", 3 } }; }).ToArray();
+            var handler = new SeasonFixture();
+            using (var api = new JellyfinApi(settings))
+            using (var test = new DesktopController(app, settings, false, new DanmuCatalog(settings, api, handler)))
+            {
+                test.Library.Replace(files); test.ShowWindow(); Pump();
+                test.Window.Match(files[0], DanmuMatchScope.Selection, files); WaitIdle(test);
+                var match = app.Windows.OfType<MatchWindow>().Single(); var tabs = Descendants<TabControl>(match).Single();
+                Assert(test.Session.Match.Episodes.Length == 12 && handler.Matches == 1 && handler.Details == 1 && (DanmuMatchScope)((TabItem)tabs.SelectedItem).Tag == DanmuMatchScope.Selection, "多选12集后自动从hash单集展开全集并默认已选影片页签", report);
+                Descendants<Button>(match).Single(x => (x.Content as string) == "预览已选影片并下载").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); WaitIdle(test);
+                Assert(test.BatchPlan.Count == 12 && test.BatchPlan.All(x => x.Selected), "12集预览按实际集号匹配且默认全部勾选", report);
+                var batch = app.Windows.OfType<BatchWindow>().Single(); var grid = Descendants<DataGrid>(batch).Single();
+                Assert(grid.Columns[0] is DataGridTemplateColumn, "批量复选框使用直接绑定模板，不启动DataGrid编辑事务", report);
+                var checkbox = Descendants<CheckBox>(grid).First(); checkbox.IsChecked = false; Pump(); test.Publish(); Pump(); Assert(!test.BatchPlan[0].Selected, "批量预览复选框能取消勾选且刷新无编辑事务异常", report);
+                checkbox.IsChecked = true; Pump(); Assert(test.BatchPlan[0].Selected, "批量预览复选框能重新勾选", report);
+                var previousPlan = test.BatchPlan;
+                Descendants<Button>(match).Single(x => (x.Content as string) == "预览已选影片并下载").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); WaitIdle(test);
+                Assert(!Object.ReferenceEquals(previousPlan, test.BatchPlan) && Object.ReferenceEquals(((BatchRow)grid.Items[0]).Entry, test.BatchPlan[0]) && grid.Items.Count == 12, "重复预览复用弹窗时绑定最新匹配计划，避免下载旧来源", report);
+                batch.Close(); match.Close(); Pump();
+                test.Window.Match(null, DanmuMatchScope.Single, new Dictionary<string, object>[0]); Pump(); match = app.Windows.OfType<MatchWindow>().Single();
+                Assert((DanmuMatchScope)((TabItem)Descendants<TabControl>(match).Single().SelectedItem).Tag == DanmuMatchScope.Season, "未选影片也可直接打开整季搜索匹配", report);
+                var target = Descendants<ComboBox>(match).Single(x => x.Items.Count > 0 && x.Items[0] is Choice && ((Choice)x.Items[0]).Label.Contains("season-fixture")); target.SelectedIndex = 0;
+                Descendants<TextBox>(match).Single().Text = "测试番剧 第三季";
+                Descendants<Button>(match).Single(x => (x.Content as string) == "搜索在线弹幕").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); WaitIdle(test);
+                Descendants<Button>(match).Single(x => (x.Content as string) == "预览整季并全部下载").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); WaitIdle(test);
+                Assert(test.BatchPlan.Count == 12 && test.BatchPlan.All(x => x.Selected), "无预选时在搜索弹窗选本地季度后可完整匹配12集", report);
+                test.ReleaseWindow(); Pump();
+            }
+            app.MainWindow = original.Window.View;
         }
         static void TestBackgroundBatch(DesktopController controller, List<string> report)
         {
@@ -208,15 +274,15 @@ namespace DanmuCinema.Desktop
         static void TestCachePage(DesktopController controller, List<string> report, string output)
         {
             var cache = controller.Gateway.Catalog.Cache;
-            cache.Write(DandanApiCache.Key("fixture-match"), "match", "测试番剧 · hash 识别", "fixture");
-            cache.Write(DandanApiCache.Key("fixture-comments"), "comment", "测试番剧 · 第 2 集", "fixture");
+            cache.Write(DandanApiCache.Key("fixture-match"), "match", "测试番剧 · hash 识别", "fixture", "测试番剧");
+            cache.Write(DandanApiCache.Key("fixture-comments"), "comment", "测试番剧 · 第 2 集", "fixture", "测试番剧");
             RecognitionTests.WriteAgedCache(cache, DandanApiCache.Key("fixture-expired"), "search", "已过期搜索", "fixture");
             controller.Window.Navigate("cache"); Settle();
             var view = Descendants<CachePage>(controller.Window.View).Single();
             var grid = Descendants<DataGrid>(view).Single(); var filter = Descendants<ComboBox>(view).Single(x => System.Windows.Automation.AutomationProperties.GetName(x) == "缓存类型");
             var retention = Descendants<ComboBox>(view).Single(x => System.Windows.Automation.AutomationProperties.GetName(x) == "统一缓存有效期");
             Assert(retention.Items.Count == 5 && retention.SelectedIndex == 1, "统一缓存有效期提供五个选项并默认三个月", report);
-            Assert(grid.Items.Count == 3, "缓存页异步加载本地条目", report);
+            Assert(grid.Items.Count == 2 && grid.Items.Cast<CacheRow>().All(x => x.Folder) && grid.Items.Cast<CacheRow>().Sum(x => x.Members.Length) == 3, "缓存页按动漫文件夹展示全部条目", report);
             Capture(controller.Window.View, Path.Combine(output, "wpf-cache.png"));
             filter.SelectedIndex = 3; Pump(); Assert(grid.Items.Count == 1, "缓存页按弹幕类型筛选", report);
             grid.SelectedIndex = 0; Descendants<Button>(view).Single(x => (x.Content as string) == "删除选中").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle();
@@ -233,7 +299,19 @@ namespace DanmuCinema.Desktop
             Assert(note.TextWrapping == TextWrapping.Wrap && note.ActualHeight > 24 && note.ActualWidth <= view.ActualWidth, "长提示在最小窗口自动换行且完整显示", report);
             Capture(controller.Window.View, Path.Combine(output, "wpf-cache-small.png"));
             clear.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle(); Assert(grid.Items.Count == 0 && cache.Entries().Length == 0, "缓存页实际清空全部缓存", report);
+            cache.Write(DandanApiCache.Key("context-1"), "comment", "第1集", "fixture", "右键测试动漫"); cache.Write(DandanApiCache.Key("context-2"), "match", "文件识别", "fixture", "右键测试动漫");
+            cache.Write(DandanApiCache.Key("context-other"), "comment", "第1集", "fixture", "另一个动漫");
+            Descendants<Button>(view).Single(x => (x.Content as string) == "刷新").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle();
+            view.OpenAnime("右键测试动漫"); Pump(); Assert(grid.Items.Count == 2 && grid.Items.Cast<CacheRow>().All(x => !x.Folder), "进入动漫缓存文件夹显示所属条目", report);
+            var context = view.CreateContextMenu((CacheRow)grid.Items[0]); ((MenuItem)context.Items[0]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); Settle();
+            Assert(grid.Items.Count == 1 && cache.Entries().Length == 2, "缓存条目右键删除只移除该条，保留同动漫其他缓存", report);
+            cache.Write(DandanApiCache.Key("context-hidden"), "hash", "文件特征", "fixture", "右键测试动漫");
+            Descendants<Button>(view).Single(x => (x.Content as string) == "刷新").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle(); filter.SelectedIndex = 3;
+            view.OpenAnime(null); Pump(); context = view.CreateContextMenu(grid.Items.Cast<CacheRow>().Single(x => x.Anime == "右键测试动漫")); ((MenuItem)context.Items[0]).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); Settle();
+            Assert(cache.Entries().Length == 1 && cache.Entries().Single().Anime == "另一个动漫", "筛选后右键删除动漫文件夹也删除隐藏类型，不影响其他动漫", report);
+            clear.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle();
             controller.Window.Navigate("overview"); Pump(); Assert(view.Children.Count == 0 && grid.ItemsSource == null, "切页释放缓存控件和条目引用", report);
+            Assert(context.Items.Count == 0 && context.PlacementTarget == null, "切页解除缓存右键菜单及其控件引用", report);
             controller.Window.View.Width = 1200; controller.Window.View.Height = 820;
         }
         static void TestDeletionControls(DesktopController controller, List<string> report, string output)

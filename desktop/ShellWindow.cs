@@ -321,7 +321,7 @@ namespace DanmuCinema.Desktop
             View.Dispatcher.BeginInvoke(new Action(() => { if (releasing || logs == null) return; if (logs.Text.Length > 160000) logs.Text = logs.Text.Substring(logs.Text.Length - 80000); logs.AppendText(Environment.NewLine + line); logs.ScrollToEnd(); }), DispatcherPriority.Background);
         }
         public void Track(Window dialog)
-        { dialog.Owner = View; dialogs.Add(dialog); dialog.Closed += (s, e) => dialogs.Remove(dialog); dialog.Show(); }
+        { dialog.Owner = View; dialog.ShowInTaskbar = false; dialogs.Add(dialog); dialog.Closed += (s, e) => { dialogs.Remove(dialog); if (!releasing) View.Dispatcher.BeginInvoke(new Action(() => { if (!releasing) Ui.RepaintOwner(View); })); }; dialog.Show(); }
         public void ShowBatch() { var existing = dialogs.OfType<BatchWindow>().FirstOrDefault(); if (existing != null) { existing.Activate(); return; } if (controller.BatchPlan != null) Track(new BatchWindow(controller)); }
         void OpenMatchWindow(bool autoSearch) { Track(new MatchWindow(controller, this, session.Match, autoSearch)); }
         public void Match(Dictionary<string, object> item, DanmuMatchScope scope, Dictionary<string, object>[] selected)

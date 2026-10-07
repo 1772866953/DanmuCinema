@@ -42,4 +42,5 @@ if (!(Test-Path -LiteralPath (Join-Path $server 'jellyfin.exe'))) {
 Write-Output '正在安装 Danmu 2.8.0.0…'
 Expand-Archive -LiteralPath (Join-Path $downloads 'danmu_2.8.0.0.zip') -DestinationPath $pluginDirectory -Force
 if (!(Test-Path -LiteralPath (Join-Path $pluginDirectory 'Jellyfin.Plugin.Danmu.dll'))) { throw '弹幕插件解压失败。' }
+& (Join-Path $PSScriptRoot 'build-playback-plugin.ps1') -Install
 Write-Output '运行组件已就绪。启动服务后，在首次设置中创建账号并添加媒体库。'

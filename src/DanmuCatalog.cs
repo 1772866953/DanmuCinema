@@ -112,7 +112,7 @@ namespace DanmuCinema
             if (p == null) throw new InvalidOperationException("这个弹幕来源已停用或地址已更改，请重新搜索。");
             return p;
         }
-        async Task<string> Fetch(Provider provider, string path, object body = null, CancellationToken cancellation = default(CancellationToken))
+        async Task<string> Fetch(Provider provider, string path, object body = null, CancellationToken cancellation = default(CancellationToken), string anime = null)
         {
             if (provider.Id != "dandan") return await FetchNetwork(provider, path, body, cancellation).ConfigureAwait(false);
             var credentials = DandanConfig.Load(); if (!credentials.Ready) throw new InvalidOperationException("官方源未就绪");
@@ -129,7 +129,7 @@ namespace DanmuCinema
             if (body != null) label = Json.Text(Json.Object(Json.Write(body)), "fileName") + " · " + Json.Text(Json.Object(Json.Write(body)), "matchMode");
             else if (path.Contains("keyword=")) label = System.Web.HttpUtility.ParseQueryString(new Uri("https://api.dandanplay.net" + path).Query)["keyword"];
             return await Cache.Get(key, kind, label, async () =>
-            { string content = await FetchNetwork(provider, path, body, cancellation).ConfigureAwait(false); EnsureSuccess(Json.Object(content)); return content; }, cancellation).ConfigureAwait(false);
+            { string content = await FetchNetwork(provider, path, body, cancellation).ConfigureAwait(false); EnsureSuccess(Json.Object(content)); return content; }, cancellation, anime).ConfigureAwait(false);
         }
         async Task<string> FetchNetwork(Provider provider, string path, object body, CancellationToken cancellation)
         {
@@ -389,7 +389,7 @@ namespace DanmuCinema
             }
             else
             {
-                var result = Json.Object(await Fetch(p, "/api/v2/bangumi/" + remote, null, cancellation)); EnsureSuccess(result);
+                var result = Json.Object(await Fetch(p, "/api/v2/bangumi/" + remote, null, cancellation, Json.Text(anime, "Name"))); EnsureSuccess(result);
                 var bangumi = Json.Child(result, "Bangumi");
                 foreach (Dictionary<string, object> e in Json.Array(bangumi, "Episodes")) list.Add(Episode(anime, Json.Text(e, "EpisodeId"), Json.Text(e, "EpisodeNumber"), Json.Text(e, "EpisodeTitle")));
             }
@@ -400,7 +400,7 @@ namespace DanmuCinema
         {
             if (String.IsNullOrWhiteSpace(remote)) throw new InvalidDataException("来源缺少弹幕 ID");
             return new Dictionary<string, object> { { "Id", StableNumber(Json.Text(a, "Provider") + ":" + Json.Text(a, "SiteId") + ":episode:" + remote) },
-                { "AnimeId", Json.Text(a, "Id") }, { "Provider", Json.Text(a, "Provider") }, { "SiteId", Json.Text(a, "SiteId") }, { "CommentId", remote }, { "Number", number }, { "Title", title } };
+                { "AnimeId", Json.Text(a, "Id") }, { "AnimeTitle", Json.Text(a, "Name") }, { "Provider", Json.Text(a, "Provider") }, { "SiteId", Json.Text(a, "SiteId") }, { "CommentId", remote }, { "Number", number }, { "Title", title } };
         }
         public Task<string> Download(Dictionary<string, object> episode) { return Download(episode, CancellationToken.None); }
         public async Task<string> Download(Dictionary<string, object> episode, CancellationToken cancellation)
@@ -426,7 +426,9 @@ namespace DanmuCinema
             else
             {
                 // Request JSON: official dandan redirects XML to related sources; JSON is uniform.
-                var result = Json.Object(await Fetch(p, "/api/v2/comment/" + remote + "?format=json&withRelated=true", null, cancellation)); EnsureSuccess(result);
+                string animeName = Json.Text(episode, "AnimeTitle");
+                if (String.IsNullOrEmpty(animeName)) { lock (sync) { Dictionary<string, object> known; if (animes.TryGetValue(Json.Text(episode, "AnimeId"), out known)) animeName = Json.Text(known, "Name"); } }
+                var result = Json.Object(await Fetch(p, "/api/v2/comment/" + remote + "?format=json&withRelated=true", null, cancellation, animeName)); EnsureSuccess(result);
                 content = CommentsToXml(Json.Array(result, "Comments"), "dandan");
             }
             double shift; Double.TryParse(Json.Text(episode, "Shift"), NumberStyles.Float, CultureInfo.InvariantCulture, out shift);
