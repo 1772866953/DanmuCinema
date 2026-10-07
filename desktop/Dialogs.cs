@@ -102,6 +102,7 @@ namespace DanmuCinema.Desktop
         readonly MatchState state;
         readonly HistoryInput keyword;
         readonly ComboBox service;
+        readonly ComboBox localTarget;
         readonly CheckBox anime, smart;
         readonly ListBox sources, episodes;
         readonly TextBlock status;
@@ -141,9 +142,9 @@ namespace DanmuCinema.Desktop
             if (state.Item == null)
             {
                 var targets = controller.Library.Entries.Where(x => x.Type != "Movie").GroupBy(MediaLibrary.DirectoryOf, StringComparer.OrdinalIgnoreCase).Select(x => new Choice { Label = x.Key, Data = x.First().Item }).ToArray();
-                var local = new ComboBox { ItemsSource = targets, SelectedIndex = -1, MinWidth = 350, MaxWidth = 760 };
-                local.SelectionChanged += (s, e) => { var choice = local.SelectedItem as Choice; state.Item = choice == null ? null : choice.Data; };
-                input.Children.Add(Ui.Row(Ui.Label("本地季度"), local)); scopes.SelectedIndex = 1; state.Scope = DanmuMatchScope.Season;
+                localTarget = new ComboBox { ItemsSource = targets, SelectedIndex = -1, MinWidth = 350, MaxWidth = 760 };
+                localTarget.SelectionChanged += (s, e) => { var choice = localTarget.SelectedItem as Choice; state.Item = choice == null ? null : choice.Data; };
+                input.Children.Add(Ui.Row(Ui.Label("本地季度"), localTarget)); scopes.SelectedIndex = 1; state.Scope = DanmuMatchScope.Season;
             }
             scopes.SelectionChanged += (s, e) => { var tab = scopes.SelectedItem as TabItem; if (tab != null) { state.Scope = (DanmuMatchScope)tab.Tag; Ui.Animate((FrameworkElement)tab.Content); } };
             Grid.SetRow(scopes, 2); Body.Children.Add(scopes); status = Ui.Text(state.Status, "Note"); Grid.SetRow(status, 3); Body.Children.Add(status);
@@ -213,6 +214,12 @@ namespace DanmuCinema.Desktop
         async Task GetEpisodes()
         {
             state.Episodes = await controller.Gateway.Catalog.Episodes(Source()); state.EpisodeIndex = state.Episodes.Length == 1 ? 0 : -1;
+            if (localTarget != null && state.Item == null)
+            {
+                string title = Json.Text(Source(), "Name"); int sourceSeason = SmartMatching.SeasonTitle(title);
+                var targets = localTarget.Items.Cast<Choice>().Where(x => SmartMatching.Episode(x.Data) > 0 && (sourceSeason == 0 || SmartMatching.Season(x.Data) == sourceSeason) && SmartMatching.Score(title, new Dictionary<string, object> { { "Name", MediaNames.SearchTitle(x.Data) } }, 0) >= 90).ToArray();
+                if (targets.Length == 1) localTarget.SelectedItem = targets[0];
+            }
             int number = state.Item == null ? 0 : SmartMatching.Episode(state.Item);
             var matches = state.Episodes.Select((x, i) => new { Data = (Dictionary<string, object>)x, Index = i }).Where(x => number > 0 && SmartMatching.RemoteNumber(x.Data) == number).ToArray(); if (matches.Length == 1) state.EpisodeIndex = matches[0].Index;
             state.Status = "读取到 " + state.Episodes.Length + " 集，请核对本地影片对应的集数。"; controller.Publish();

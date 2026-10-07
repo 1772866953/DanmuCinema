@@ -248,11 +248,17 @@ namespace DanmuCinema.Desktop
                 batch.Close(); match.Close(); Pump();
                 test.Window.Match(null, DanmuMatchScope.Single, new Dictionary<string, object>[0]); Pump(); match = app.Windows.OfType<MatchWindow>().Single();
                 Assert((DanmuMatchScope)((TabItem)Descendants<TabControl>(match).Single().SelectedItem).Tag == DanmuMatchScope.Season, "未选影片也可直接打开整季搜索匹配", report);
-                var target = Descendants<ComboBox>(match).Single(x => x.Items.Count > 0 && x.Items[0] is Choice && ((Choice)x.Items[0]).Label.Contains("season-fixture")); target.SelectedIndex = 0;
+                var target = Descendants<ComboBox>(match).Single(x => x.Items.Count > 0 && x.Items[0] is Choice && ((Choice)x.Items[0]).Label.Contains("season-fixture"));
                 Descendants<TextBox>(match).Single().Text = "测试番剧 第三季";
                 Descendants<Button>(match).Single(x => (x.Content as string) == "搜索在线弹幕").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); WaitIdle(test);
+                Assert(target.SelectedIndex == 0 && test.Session.Match.Item != null, "无预选搜索后自动关联唯一同名同季度的本地目录", report);
                 Descendants<Button>(match).Single(x => (x.Content as string) == "预览整季并全部下载").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); WaitIdle(test);
-                Assert(test.BatchPlan.Count == 12 && test.BatchPlan.All(x => x.Selected), "无预选时在搜索弹窗选本地季度后可完整匹配12集", report);
+                Assert(test.BatchPlan.Count == 12 && test.BatchPlan.All(x => x.Selected), "无预选搜索后可直接完整匹配12集", report);
+                foreach (var child in app.Windows.OfType<DialogWindow>().ToArray()) child.Close(); Pump();
+                var duplicate = new Dictionary<string, object>(files[0]); string alternate = Path.Combine(settings.MediaFolder, "another-version", "episode (1).mkv"); Directory.CreateDirectory(Path.GetDirectoryName(alternate)); File.WriteAllText(alternate, "alternate synthetic version"); duplicate["Path"] = alternate; duplicate["Id"] = "duplicate-fixture";
+                test.Library.Replace(files.Concat(new[] { duplicate })); test.Window.Match(null, DanmuMatchScope.Single, new Dictionary<string, object>[0]); Pump(); match = app.Windows.OfType<MatchWindow>().Single();
+                Descendants<TextBox>(match).Single().Text = "测试番剧 第三季"; Descendants<Button>(match).Single(x => (x.Content as string) == "搜索在线弹幕").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); WaitIdle(test);
+                Assert(test.Session.Match.Item == null, "存在多个同番同季度目录时不自动选择或覆盖，保留明确目录选择", report);
                 test.ReleaseWindow(); Pump();
             }
             app.MainWindow = original.Window.View;
