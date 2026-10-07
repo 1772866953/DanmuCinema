@@ -21,26 +21,25 @@ namespace DanmuCinema.Desktop
     {
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
         [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
-        [DllImport("user32.dll")] static extern bool RedrawWindow(IntPtr window, IntPtr rect, IntPtr region, uint flags);
+        [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
         public static bool IsForeground(Window window)
         { return window.IsActive || new WindowInteropHelper(window).Handle == GetForegroundWindow(); }
         public static void RestoreDialogOwner(Window owner, bool foreground)
         {
             if (owner == null || !owner.IsVisible || owner.WindowState == WindowState.Minimized) return;
-            RepaintOwner(owner);
+            var handle = new WindowInteropHelper(owner).Handle;
+            // WPF/DWM retain the parent's composed surface while its child closes.
+            // Showing an already visible HWND and synchronously repainting its
+            // non-client frame discards that smooth handover and can flash white.
+            // Repair only an actual native/logical visibility mismatch.
+            if (handle != IntPtr.Zero && !IsWindowVisible(handle))
+                SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, 0x1 | 0x2 | 0x4 | 0x10 | 0x40);
             // Only the closure of a foreground child returns focus to its direct
             // parent. Closing background tasks must never interrupt another app.
-            if (foreground) owner.Activate();
-        }
-        public static void RepaintOwner(Window owner)
-        {
-            if (owner == null || !owner.IsVisible || owner.WindowState == WindowState.Minimized) return;
-            var handle = new WindowInteropHelper(owner).Handle;
-            // Repaint the owner after native chrome/activation transitions, retaining
-            // its placement and the other application's foreground focus.
-            SetWindowPos(handle, IntPtr.Zero, 0, 0, 0, 0, 0x1 | 0x2 | 0x4 | 0x10 | 0x40);
-            owner.InvalidateVisual(); RedrawWindow(handle, IntPtr.Zero, IntPtr.Zero, 0x1 | 0x100 | 0x400);
+            // IsActive can lag native focus during owned-window destruction.
+            // Consult the HWND here so an inactive-looking handover is repaired.
+            if (foreground && handle != GetForegroundWindow()) owner.Activate();
         }
         public static bool EnableWindowTransitions(Window window)
         {

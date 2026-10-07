@@ -22,6 +22,7 @@ namespace DanmuCinema.Desktop
     {
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
         [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
+        [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int command);
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wparam, IntPtr lparam);
         public static int Run()
@@ -150,6 +151,7 @@ namespace DanmuCinema.Desktop
             Assert(window.WindowState == WindowState.Maximized && (string)outside.Tag == "restore", "标题栏原生命令最大化并更新还原图标", report);
             outside.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Settle();
             Assert(window.WindowState == WindowState.Normal && (string)outside.Tag == "maximize", "原生命令还原并保留普通窗口状态", report);
+            TestOwnerRestoration(window, report);
             var alert = new AlertWindow("退出弹幕影院", "当前定时尚未完成。\n退出将取消任务，确定退出？", true) { Owner = window };
             bool result = true;
             alert.Loaded += (s, e) => alert.Dispatcher.BeginInvoke(new Action(() => { Capture(alert, Path.Combine(output, "wpf-alert.png")); alert.Close(); }));
@@ -158,6 +160,33 @@ namespace DanmuCinema.Desktop
             var info = new AlertWindow("无法匹配", "请先选择影片。\n选择媒体库内的视频后，可以匹配单集或整个季度。", false) { Owner = window };
             info.Loaded += (s, e) => info.Dispatcher.BeginInvoke(new Action(() => { Capture(info, Path.Combine(output, "wpf-information.png")); Descendants<Button>(info).Single(x => (x.Content as string) == "知道了").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); }));
             Assert(info.ShowDialog() == true && info.Content == null, "主题信息框确认后关闭并释放控件", report);
+        }
+        static void TestOwnerRestoration(Window window, List<string> report)
+        {
+            var source = (HwndSource)PresentationSource.FromVisual(window);
+            foreach (var state in new[] { WindowState.Normal, WindowState.Maximized })
+            {
+                window.WindowState = state; window.Activate(); Settle();
+                int positions = 0, framePaints = 0, backgroundErases = 0;
+                HwndSourceHook hook = delegate(IntPtr hwnd, int message, IntPtr wparam, IntPtr lparam, ref bool handled)
+                {
+                    if (message == 0x46) positions++;
+                    if (message == 0x85) framePaints++;
+                    if (message == 0x14) backgroundErases++;
+                    return IntPtr.Zero;
+                };
+                source.AddHook(hook);
+                try { Ui.RestoreDialogOwner(window, false); Ui.RestoreDialogOwner(window, true); }
+                finally { source.RemoveHook(hook); }
+                Assert(positions == 0 && framePaints == 0 && backgroundErases == 0, "恢复可见主窗口不触发强制显示、同步边框绘制或背景擦除：" + state + " (" + positions + "/" + framePaints + "/" + backgroundErases + ")", report);
+                Assert(window.IsActive && IsWindowVisible(new WindowInteropHelper(window).Handle), "取消强制重绘后保持窗口可见及前台状态：" + state, report);
+                var handle = new WindowInteropHelper(window).Handle;
+                ShowWindow(handle, 0);
+                Assert(window.IsVisible && !IsWindowVisible(handle), "隔离复现 WPF 可见但原生窗口隐藏的状态：" + state, report);
+                Ui.RestoreDialogOwner(window, true); Pump();
+                Assert(IsWindowVisible(handle) && window.WindowState == state && window.IsActive, "仅对真正隐藏的原生窗口恢复显示并保留状态：" + state, report);
+            }
+            window.WindowState = WindowState.Normal; Pump();
         }
         static void TestDialogs(DesktopController controller, List<string> report, string output)
         {
@@ -230,9 +259,10 @@ namespace DanmuCinema.Desktop
                     }));
                     alert.ShowDialog(); Pump(); Assert(second.IsActive, "关闭三级模态提示后焦点回到整季窗口：" + state, report);
                     Descendants<Button>(second).Single(x => (x.Tag as string) == "close").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Pump();
-                    Assert(first.IsActive && GetForegroundWindow() == new WindowInteropHelper(first).Handle && controller.Window.View.IsVisible, "切换应用后二级关闭返回一级弹窗：" + state, report);
+                    Assert(first.IsActive && GetForegroundWindow() == new WindowInteropHelper(first).Handle && controller.Window.View.IsVisible, "切换应用后二级关闭返回一级弹窗：" + state + " (active=" + first.IsActive + ", foreground=" + (GetForegroundWindow() == new WindowInteropHelper(first).Handle) + ", visible=" + first.IsVisible + ")", report);
                     Descendants<Button>(first).Single(x => (x.Tag as string) == "close").RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent)); Pump();
                     Assert(controller.Window != null && controller.Window.View.IsActive && IsWindowVisible(new WindowInteropHelper(controller.Window.View).Handle) && GetForegroundWindow() == new WindowInteropHelper(controller.Window.View).Handle && mainClosing == 0, "继续关闭一级弹窗主窗口保持前台且未触发托盘关闭：" + state, report);
+                    Assert(DarkRootBackground(controller.Window.View), "逐层关闭后主窗口底层保持完全不透明的深色背景：" + state, report);
                     var background = new SourcesWindow(controller); controller.Window.Track(background); Pump(); other.Activate(); Pump(); background.Close(); Pump();
                     Assert(GetForegroundWindow() == other.Handle, "后台关闭弹窗不抢占其他应用焦点：" + state, report);
                 }
@@ -248,6 +278,18 @@ namespace DanmuCinema.Desktop
             // Bottom blank area, away from text, selection, rounded border and scrollbar.
             int p = ((bitmap.PixelHeight - 22) * bitmap.PixelWidth + bitmap.PixelWidth / 2) * 4;
             return pixels[p + 3] == 255 && pixels[p] < 130 && pixels[p + 1] < 130 && pixels[p + 2] < 130;
+        }
+        static bool DarkRootBackground(Window window)
+        {
+            var root = (FrameworkElement)window.Content;
+            var bitmap = new RenderTargetBitmap((int)Math.Ceiling(root.ActualWidth), (int)Math.Ceiling(root.ActualHeight), 96, 96, PixelFormats.Pbgra32); bitmap.Render(root);
+            var pixels = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4]; bitmap.CopyPixels(pixels, bitmap.PixelWidth * 4, 0);
+            foreach (var point in new[] { new Point(5, 5), new Point(bitmap.PixelWidth - 6, 55), new Point(bitmap.PixelWidth / 2, bitmap.PixelHeight - 6) })
+            {
+                int p = ((int)point.Y * bitmap.PixelWidth + (int)point.X) * 4;
+                if (pixels[p + 3] != 255 || pixels[p] >= 150 || pixels[p + 1] >= 150 || pixels[p + 2] >= 150) return false;
+            }
+            return true;
         }
         sealed class SeasonFixture : HttpMessageHandler
         {
