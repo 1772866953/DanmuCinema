@@ -96,7 +96,12 @@ namespace DanmuCinema.Desktop
             using (var reader = new System.IO.StreamReader(stream))
                 return (T)XamlReader.Parse(reader.ReadToEnd().Replace("assembly=DanmuCinema\"", "assembly=" + typeof(Ui).Assembly.GetName().Name + "\""));
         }
-        public static void InstallTheme(Application application) { application.Resources.MergedDictionaries.Add(Load<ResourceDictionary>("Theme.xaml")); }
+        public static void InstallTheme(Application application) { application.Resources.MergedDictionaries.Add(Load<ResourceDictionary>("Theme.xaml")); var logo = Load<DrawingImage>("AppLogo.xaml"); logo.Freeze(); application.Resources["AppLogo"] = logo; }
+        public static Border TableSurface(UIElement content)
+        {
+            var border = new SmoothBorder { Child = content, CornerRadius = new CornerRadius(12), Background = (Brush)Resource("Surface"), BorderBrush = (Brush)Resource("Line"), BorderThickness = new Thickness(1) };
+            border.SizeChanged += (s, e) => border.Clip = SmoothBorder.Rounded(new Rect(border.RenderSize), border.CornerRadius); return border;
+        }
         public static TextBlock Text(string text, string style = null)
         { var value = new TextBlock { Text = text }; if (style != null) value.Style = (Style)Resource(style); return value; }
         static readonly DependencyProperty ButtonActionProperty = DependencyProperty.RegisterAttached("ButtonAction", typeof(Action), typeof(Ui));

@@ -75,7 +75,7 @@ namespace DanmuCinema.Desktop
             {
                 int months = CacheRetention.Months[retention.SelectedIndex]; await Refresh(() => cache.SetRetention(months));
             }));
-            Children.Add(Ui.Stack(policy, toolbar, breadcrumb, summary)); Grid.SetRow(listing, 1); Children.Add(listing);
+            Children.Add(Ui.Stack(policy, toolbar, breadcrumb, summary)); var table = Ui.TableSurface(listing); Grid.SetRow(table, 1); Children.Add(table);
             var note = Ui.Text("首次成功请求后保存，后续先读取本地缓存。所有类型共用有效期，按保存时间计算，修改后也适用于已有缓存。“长期”不因时间过期，仍受容量上限约束。删除缓存不会删除视频旁的 XML；缓存过期或被删除后，下次相关请求才重新联网。", "Note"); Grid.SetRow(note, 2); Children.Add(note);
             filter.SelectionChanged += FilterChanged; Loaded += InitialLoad;
         }

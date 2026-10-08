@@ -66,7 +66,7 @@ namespace DanmuCinema.Desktop
         readonly RegisteredWaitHandle showWait;
         readonly Forms.ToolStripItem traySchedule, trayCancel;
         CancellationTokenSource batchCancellation;
-        bool checking, disposed, warningShown, awakeHeld;
+        bool checking, disposed, warningShown, awakeHeld, weeklyKeepAwake;
         DateTime lastLibraryAttempt, lastLibraryRefresh;
         public DesktopController(Application application, AppSettings settings, bool infrastructure = true, DanmuCatalog catalog = null)
         {
@@ -172,7 +172,7 @@ namespace DanmuCinema.Desktop
                 }
                 else if (Window != null)
                 {
-                    ServerStatus = "运行中 · Jellyfin " + Json.Text(await Services.Api.PublicInfo(), "Version") + " · HTTP " + Settings.Port;
+                    ServerStatus = "运行中 · 服务版本 " + Json.Text(await Services.Api.PublicInfo(), "Version") + " · HTTP " + Settings.Port;
                     if (String.IsNullOrEmpty(Services.Api.Token)) { PluginStatus = "请初始化 / 登录管理员"; SessionStatus = "尚未登录"; }
                     else
                     {
@@ -181,7 +181,7 @@ namespace DanmuCinema.Desktop
                             var plugin = (await Services.Api.Plugins()).OfType<Dictionary<string, object>>().FirstOrDefault(x => Json.Text(x, "Name").IndexOf("Danmu", StringComparison.OrdinalIgnoreCase) >= 0);
                             PluginStatus = plugin == null ? "未加载，停止服务后修复组件" : Json.Text(plugin, "Status") + " · " + Json.Text(plugin, "Version");
                             var playing = (await Services.Api.Sessions()).OfType<Dictionary<string, object>>().Where(x => Json.Child(x, "NowPlayingItem") != null).ToArray();
-                            SessionStatus = playing.Length == 0 ? "暂无播放" : String.Join("；", playing.Select(x => Json.Text(x, "Client") + " · " + Json.Text(Json.Child(x, "NowPlayingItem"), "Name") + " · " + Json.Text(Json.Child(x, "PlayState"), "PlayMethod")));
+                            SessionStatus = playing.Length == 0 ? "暂无播放" : String.Join("；", playing.Select(x => "客户端播放 · " + Json.Text(Json.Child(x, "NowPlayingItem"), "Name") + " · " + Json.Text(Json.Child(x, "PlayState"), "PlayMethod")));
                         }
                         catch { PluginStatus = "登录已失效或接口异常，请重新登录"; }
                     }
@@ -323,6 +323,7 @@ namespace DanmuCinema.Desktop
                     Scheduler.StartAt(new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local)), action);
                 }
                 if (awake) { PowerActions.KeepAwake(true); awakeHeld = true; }
+                weeklyKeepAwake = false;
                 ScheduleInitial = Scheduler.Remaining.TotalSeconds; warningShown = false;
                 ScheduleStatus = "定时" + PowerActions.Name(action) + "进行中"; scheduleTimer.Start(); Publish();
             }
@@ -331,7 +332,22 @@ namespace DanmuCinema.Desktop
         public void CancelSchedule()
         {
             if (!Scheduler.Cancel()) return;
+            weeklyKeepAwake = false;
             scheduleTimer.Stop(); ReleaseAwake(); ScheduleStatus = "已取消定时，原定操作不会执行。"; Log.Write(ScheduleStatus); UpdateTraySchedule(); Publish();
+        }
+        public void StartWeeklySchedule(int days, TimeSpan time, PowerAction action, bool awake)
+        {
+            if (Closing || Scheduler.Active || Scheduler.State == ScheduleState.Executing) return;
+            PowerActions.Validate(action);
+            try
+            {
+                Scheduler.StartWeekly(days, time, action);
+                if (awake) { PowerActions.KeepAwake(true); awakeHeld = true; }
+                weeklyKeepAwake = awake;
+                ScheduleInitial = Scheduler.Remaining.TotalSeconds; warningShown = false;
+                ScheduleStatus = "每周" + PowerActions.Name(action) + "计划进行中"; scheduleTimer.Start(); Publish();
+            }
+            catch { Scheduler.Cancel(); ReleaseAwake(); throw; }
         }
         void PowerChanged(object sender, PowerModeChangedEventArgs e)
         { if (e.Mode == PowerModes.Resume) application.Dispatcher.BeginInvoke(new Action(() => { if (!disposed) { Scheduler.OnResume(); warningShown = false; } })); }
@@ -351,7 +367,17 @@ namespace DanmuCinema.Desktop
             ScheduleStatus = "正在执行" + PowerActions.Name(Scheduler.Action) + "，无法再取消。"; Publish();
             try { if (Scheduler.Action == PowerAction.StopServices) await StopAll(); else await Task.Run(() => PowerActions.Execute(Scheduler.Action)); Scheduler.Finish(true); ScheduleStatus = "定时操作已完成。"; }
             catch (Exception error) { Scheduler.Finish(false); ScheduleStatus = "执行失败：" + error.Message; ShowWindow(); Notify("定时操作失败", error.Message); }
-            finally { Busy = false; Log.Write(ScheduleStatus); UpdateTraySchedule(); Publish(); }
+            finally
+            {
+                Busy = false;
+                if (Scheduler.Active && !Closing)
+                {
+                    try { if (weeklyKeepAwake) { PowerActions.KeepAwake(true); awakeHeld = true; } warningShown = false; ScheduleInitial = Scheduler.Remaining.TotalSeconds; scheduleTimer.Start(); }
+                    catch (Exception error) { Scheduler.Cancel(); weeklyKeepAwake = false; ScheduleStatus = "计划已停止：" + error.Message; }
+                }
+                else weeklyKeepAwake = false;
+                Log.Write(ScheduleStatus); UpdateTraySchedule(); Publish();
+            }
             await UpdateStatus();
         }
         void UpdateTraySchedule()

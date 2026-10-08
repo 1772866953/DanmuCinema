@@ -214,7 +214,7 @@ namespace DanmuCinema.Desktop
             grid.Columns.Add(new DataGridTemplateColumn { Header = "下载", CellTemplate = (DataTemplate)System.Windows.Markup.XamlReader.Parse("<DataTemplate xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'><CheckBox IsChecked='{Binding Selected,Mode=TwoWay,UpdateSourceTrigger=PropertyChanged}' HorizontalAlignment='Center' Margin='0'/></DataTemplate>"), Width = 62 });
             string[] headers = { "集号", "本地文件", "在线集数", "状态" }, properties = { "Number", "Local", "Remote", "Status" }; double[] widths = { 60, 2, 1.6, 1.4 };
             for (int i = 0; i < headers.Length; i++) grid.Columns.Add(new DataGridTextColumn { Header = headers[i], Binding = new Binding(properties[i]), Width = new DataGridLength(widths[i], i == 0 ? DataGridLengthUnitType.Pixel : DataGridLengthUnitType.Star), IsReadOnly = true, MinWidth = i == 0 ? 55 : 130 });
-            Grid.SetRow(grid, 1); Body.Children.Add(grid);
+            var table = Ui.TableSurface(grid); Grid.SetRow(table, 1); Body.Children.Add(table);
             keep = Ui.Check("保留已有 XML（取消勾选将直接覆盖）", controller.BatchKeep); keep.Checked += (s, e) => controller.BatchKeep = true; keep.Unchecked += (s, e) => controller.BatchKeep = false;
             // The view must not await the job: its async state machine would retain the
             // complete window during a long batch after the main window enters the tray.

@@ -16,7 +16,7 @@ namespace DanmuCinema
             var animeko = Check("Animeko 公益弹幕（Bangumi 动漫目录）", settings.EnableAnimeko);
             var bahamut = Check("巴哈姆特动画疯（支持繁简体名称搜索）", settings.EnableBahamut);
             var existing = Check("保留现有平台来源（B 站、爱奇艺、优酷等）", settings.EnableExistingDanmu);
-            var only = Check("iPad 搜索默认只看动漫；电脑搜索窗口可切换显示全部", settings.AnimeOnly);
+            var only = Check("客户端搜索默认只看动漫；电脑搜索窗口可切换显示全部", settings.AnimeOnly);
             var dandan = Check("弹弹play 官方 API", settings.EnableDandan);
             panel.Controls.Add(animeko); panel.Controls.Add(bahamut); panel.Controls.Add(existing); panel.Controls.Add(only); panel.Controls.Add(dandan);
             panel.Controls.Add(new Label { Text = "自定义兼容 API（最多 5 个，每行：来源名称|API 根地址）", AutoSize = true, Margin = new Padding(0, 18, 0, 5) });
@@ -45,7 +45,7 @@ namespace DanmuCinema
                         settings.EncryptedDandanSecret = before.EncryptedDandanSecret; settings.EncryptedAdditionalApis = before.EncryptedAdditionalApis;
                         throw;
                     }
-                    Log.Write("弹幕来源已保存；电脑和 iPad 下次搜索立即采用新来源。"); DialogResult = DialogResult.OK; Close();
+                    Log.Write("弹幕来源已保存；电脑和客户端下次搜索立即采用新来源。"); DialogResult = DialogResult.OK; Close();
                 }
                 catch (Exception error) { status.Text = error.Message; }
             };

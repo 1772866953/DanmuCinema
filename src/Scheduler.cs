@@ -29,6 +29,9 @@ namespace DanmuCinema
         private DateTimeOffset target;
         private long? graceDeadline;
         private long lastPoll;
+        private WeeklyPlan weekly;
+        public bool Weekly { get { return weekly != null; } }
+        public string WeeklyLabel { get { return weekly == null ? "" : weekly.Label; } }
         public ScheduleState State { get; private set; }
         public PowerAction Action { get; private set; }
         public bool Active { get { return State == ScheduleState.Waiting || State == ScheduleState.Warning; } }
@@ -56,6 +59,7 @@ namespace DanmuCinema
             if (delay <= TimeSpan.Zero || delay > TimeSpan.FromDays(30))
                 throw new ArgumentException("请输入大于 0 且不超过 30 天的倒计时。");
             EnsureCanStart();
+            weekly = null;
             relative = true;
             dueMilliseconds = clock.Milliseconds + (long)delay.TotalMilliseconds;
             target = clock.Now + delay;
@@ -65,9 +69,15 @@ namespace DanmuCinema
         {
             if (time <= clock.Now) throw new ArgumentException("执行时间必须晚于当前时间。");
             EnsureCanStart();
+            weekly = null;
             relative = false;
             target = time;
             Begin(action);
+        }
+        public void StartWeekly(int days, TimeSpan time, PowerAction action, TimeZoneInfo zone = null)
+        {
+            EnsureCanStart(); var plan = new WeeklyPlan(days, time, zone);
+            var next = plan.Next(clock.Now); weekly = plan; relative = false; target = next; Begin(action);
         }
         private void EnsureCanStart()
         {
@@ -84,6 +94,7 @@ namespace DanmuCinema
         {
             if (!Active) return false;
             graceDeadline = null;
+            weekly = null;
             State = ScheduleState.Cancelled;
             return true;
         }
@@ -118,7 +129,11 @@ namespace DanmuCinema
         public void Finish(bool success)
         {
             if (State != ScheduleState.Executing) throw new InvalidOperationException("任务尚未开始执行。");
-            State = success ? ScheduleState.Completed : ScheduleState.Failed;
+            if (success && weekly != null)
+            {
+                target = weekly.Next(clock.Now > target ? clock.Now : target); relative = false; Begin(Action);
+            }
+            else { weekly = null; State = success ? ScheduleState.Completed : ScheduleState.Failed; }
         }
         public static string FormatRemaining(TimeSpan remaining)
         {

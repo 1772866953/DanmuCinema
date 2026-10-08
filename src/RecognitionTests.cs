@@ -50,7 +50,7 @@ namespace DanmuCinema
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellation)
             {
                 cancellation.ThrowIfCancellationRequested(); string content;
-                if (request.RequestUri.AbsolutePath == "/Sessions") { Sessions++; content = Json.Write(new[] { new { NowPlayingItem = Playing ? (object)new { Id = "fixturevideo", Type = "Episode" } : null, Client = "SenPlayer" } }); }
+                if (request.RequestUri.AbsolutePath == "/Sessions") { Sessions++; content = Json.Write(new[] { new { NowPlayingItem = Playing ? (object)new { Id = "fixturevideo", Type = "Episode" } : null, Client = "通用客户端" } }); }
                 else { Items++; content = Json.Write(item); }
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(content) });
             }
@@ -105,7 +105,7 @@ namespace DanmuCinema
                 using (var playApi = new JellyfinApi(settings, playing)) using (var monitor = new AutomaticDanmu(settings, playApi, catalog, () => true))
                 {
                     monitor.Start(); int attempts = 0; while (!File.Exists(xml) && attempts++ < 100) await Task.Delay(30); await monitor.Stop();
-                    SelfTests.Assert(File.Exists(xml) && playing.Sessions > 0 && handler.Requests == before, "模拟 SenPlayer 发起 Jellyfin 播放，后台监测自动识别和缓存下载", report);
+                    SelfTests.Assert(File.Exists(xml) && playing.Sessions > 0 && handler.Requests == before, "模拟 通用客户端 发起 Jellyfin 播放，后台监测自动识别和缓存下载", report);
                     File.Delete(xml); monitor.SuppressUntilPlaybackEnds(new[] { "fixturevideo" }); int sessionsBefore = playing.Sessions;
                     monitor.Start(); attempts = 0; while (playing.Sessions == sessionsBefore && attempts++ < 100) await Task.Delay(30); await monitor.Stop();
                     SelfTests.Assert(!File.Exists(xml) && handler.Requests == before, "当前播放中删除弹幕后不会立刻自动重新下载", report);

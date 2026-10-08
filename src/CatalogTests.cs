@@ -68,9 +68,9 @@ namespace DanmuCinema
                         string root = "http://127.0.0.1:" + settings.DanmuPort + "/" + gateway.Key;
                         string search = await client.GetStringAsync(root + "/api/v2/search/anime?keyword=" + Uri.EscapeDataString("骸骨骑士"));
                         var data = Json.Object(search);
-                        SelfTests.Assert(Json.Array(data, "Animes").Length == 2 && Json.Array(data, "SourceStatus").Length == 3, "iPad 网关实际返回多来源搜索与故障状态", report);
+                        SelfTests.Assert(Json.Array(data, "Animes").Length == 2 && Json.Array(data, "SourceStatus").Length == 3, "客户端 网关实际返回多来源搜索与故障状态", report);
                         string content = await client.GetStringAsync(root + "/api/v2/comment/" + Json.Text((Dictionary<string, object>)eps[0], "Id") + "?format=xml");
-                        SelfTests.Assert(DanmuCatalog.ParseXml(content).GetElementsByTagName("d").Count == 2 && DanmuCatalog.ParseXml(content).GetElementsByTagName("d")[0].InnerText == "中文<&弹幕", "iPad 网关实际输出按时间排序的新增来源 XML", report);
+                        SelfTests.Assert(DanmuCatalog.ParseXml(content).GetElementsByTagName("d").Count == 2 && DanmuCatalog.ParseXml(content).GetElementsByTagName("d")[0].InnerText == "中文<&弹幕", "客户端 网关实际输出按时间排序的新增来源 XML", report);
                     }
                     await gateway.Stop();
                 }

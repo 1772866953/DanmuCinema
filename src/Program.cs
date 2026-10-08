@@ -21,6 +21,7 @@ namespace DanmuCinema
             if (args.Contains("--interaction-fixes-test")) return Desktop.InteractionFixTests.Run();
             if (args.Contains("--combo-borders-test")) return Desktop.ComboBorderTests.Run();
             if (args.Contains("--motion-test")) return Desktop.MotionTests.Run();
+            if (args.Contains("--branding-weekly-test")) return Desktop.BrandingWeeklyTests.Run();
             bool owner;
             using (var singleton = new Mutex(true, "Local\\DanmuCinema-" + StableId(Paths.Root), out owner))
             {

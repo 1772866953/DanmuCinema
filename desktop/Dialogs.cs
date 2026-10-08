@@ -114,7 +114,7 @@ namespace DanmuCinema.Desktop
             var animeko = Ui.Check("Animeko 公益弹幕（Bangumi 动漫目录）", settings.EnableAnimeko);
             var bahamut = Ui.Check("巴哈姆特动画疯（繁简体名称搜索）", settings.EnableBahamut);
             var existing = Ui.Check("保留现有平台来源（B 站、爱奇艺、优酷等）", settings.EnableExistingDanmu);
-            var only = Ui.Check("iPad 搜索默认只看动漫", settings.AnimeOnly);
+            var only = Ui.Check("客户端搜索默认只看动漫", settings.AnimeOnly);
             var dandan = Ui.Check("弹弹play 官方 API", settings.EnableDandan);
             var custom = Ui.Input(SettingsStore.Unprotect(settings.EncryptedAdditionalApis), Double.NaN); custom.AcceptsReturn = true; custom.TextWrapping = TextWrapping.NoWrap; custom.VerticalScrollBarVisibility = ScrollBarVisibility.Auto; custom.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto; custom.Height = 125;
             var status = Ui.Text("", "Note");

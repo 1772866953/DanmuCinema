@@ -14,6 +14,7 @@ namespace DanmuCinema
         NumericUpDown scheduleHours, scheduleMinutes, scheduleSeconds;
         DateTimePicker scheduleDate, scheduleTime;
         CheckBox scheduleAwake;
+        CheckBox[] scheduleDays;
         Control scheduleEditor, delayInputs, presetInputs, dateInputs;
         Button scheduleStart, scheduleCancel;
         Label scheduleCountdown, scheduleStatus, scheduleTarget, scheduleDescription;
@@ -43,7 +44,7 @@ namespace DanmuCinema
             editor.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             var inputs = editor; scheduleEditor = editor;
             scheduleMode = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 190 };
-            scheduleMode.Items.AddRange(new object[] { "倒计时", "指定时间" }); scheduleMode.SelectedIndex = 0;
+            scheduleMode.Items.AddRange(new object[] { "倒计时", "指定时间", "每周计划" }); scheduleMode.SelectedIndex = 0;
             Add(inputs, Actions(ScheduleLabel("计时方式"), scheduleMode));
             scheduleHours = ScheduleNumber(720, 0); scheduleMinutes = ScheduleNumber(59, 30); scheduleSeconds = ScheduleNumber(59, 0);
             delayInputs = Actions(scheduleHours, ScheduleLabel("小时", 45), scheduleMinutes, ScheduleLabel("分钟", 45), scheduleSeconds, ScheduleLabel("秒", 32));
@@ -62,12 +63,14 @@ namespace DanmuCinema
             scheduleTime = new DateTimePicker { Format = DateTimePickerFormat.Custom, CustomFormat = "HH:mm:ss", ShowUpDown = true, Width = 140, Value = DateTime.Now.AddMinutes(30) };
             dateInputs = Actions(ScheduleLabel("执行日期"), scheduleDate, ScheduleLabel("时间", 45), scheduleTime);
             Add(inputs, dateInputs); dateInputs.Visible = false;
-            scheduleMode.SelectedIndexChanged += (s, e) => { delayInputs.Visible = presetInputs.Visible = scheduleMode.SelectedIndex == 0; dateInputs.Visible = scheduleMode.SelectedIndex == 1; };
+            scheduleDays = new CheckBox[7]; var weekInputs = Actions(); weekInputs.Visible = false;
+            for (int day = 0; day < 7; day++) { scheduleDays[day] = new CheckBox { Text = WeeklyPlan.DayNames[day], Checked = true, AutoSize = true }; weekInputs.Controls.Add(scheduleDays[day]); } Add(inputs, weekInputs);
+            scheduleMode.SelectedIndexChanged += (s, e) => { delayInputs.Visible = presetInputs.Visible = scheduleMode.SelectedIndex == 0; dateInputs.Visible = scheduleMode.SelectedIndex > 0; scheduleDate.Enabled = scheduleMode.SelectedIndex == 1; weekInputs.Visible = scheduleMode.SelectedIndex == 2; };
             scheduleAction = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 230 };
             foreach (PowerAction action in Enum.GetValues(typeof(PowerAction))) scheduleAction.Items.Add(PowerActions.Name(action));
-            scheduleAction.SelectedIndex = 0;
+            scheduleAction.SelectedIndex = (int)PowerAction.Hibernate;
             Add(inputs, Actions(ScheduleLabel("到时操作"), scheduleAction));
-            scheduleDescription = TextLabel(PowerActions.Description(PowerAction.StopServices), 42); Add(inputs, scheduleDescription);
+            scheduleDescription = TextLabel(PowerActions.Description(PowerAction.Hibernate), 42); Add(inputs, scheduleDescription);
             scheduleAction.SelectedIndexChanged += (s, e) => scheduleDescription.Text = PowerActions.Description((PowerAction)scheduleAction.SelectedIndex);
             scheduleAwake = new CheckBox { Text = "定时期间阻止电脑自动睡眠（屏幕仍可熄灭）", AutoSize = true };
             Add(inputs, Actions(scheduleAwake)); Add(stack, editor);
@@ -95,6 +98,11 @@ namespace DanmuCinema
                 PowerActions.Validate(action);
                 if (scheduleMode.SelectedIndex == 0)
                     scheduler.StartDelay(TimeSpan.FromHours((double)scheduleHours.Value) + TimeSpan.FromMinutes((double)scheduleMinutes.Value) + TimeSpan.FromSeconds((double)scheduleSeconds.Value), action);
+                else if (scheduleMode.SelectedIndex == 2)
+                {
+                    int mask = 0; for (int day = 0; day < 7; day++) if (scheduleDays[day].Checked) mask |= 1 << day;
+                    scheduler.StartWeekly(mask, scheduleTime.Value.TimeOfDay, action);
+                }
                 else
                 {
                     var local = DateTime.SpecifyKind(scheduleDate.Value.Date + scheduleTime.Value.TimeOfDay, DateTimeKind.Unspecified);
@@ -175,8 +183,13 @@ namespace DanmuCinema
             }
             finally
             {
-                busy = false; SetScheduleControls(); traySchedule.Text = "当前没有定时任务";
-                scheduleTarget.Text = "本次任务已结束，可以重新设置。";
+                busy = false; SetScheduleControls();
+                if (scheduler.Active)
+                {
+                    try { if (scheduleAwake.Checked) { PowerActions.KeepAwake(true); scheduleAwakeHeld = true; } scheduleWarningShown = false; scheduleInitialSeconds = scheduler.Remaining.TotalSeconds; RenderSchedule(); }
+                    catch (Exception error) { scheduler.Cancel(); ReleaseScheduleAwake(); SetScheduleControls(); scheduleStatus.Text = "计划已停止：" + error.Message; Log.Write(scheduleStatus.Text); }
+                }
+                else { traySchedule.Text = "当前没有定时任务"; scheduleTarget.Text = "本次任务已结束，可以重新设置。"; }
             }
             await UpdateStatus();
         }

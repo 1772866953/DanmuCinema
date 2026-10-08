@@ -107,17 +107,17 @@ namespace DanmuCinema
             var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(0, 20, 0, 0) };
             AddNavigation(nav, "overview", "01   服务总览");
             AddNavigation(nav, "library", "02   影片与弹幕");
-            AddNavigation(nav, "connect", "03   连接 iPad");
+            AddNavigation(nav, "connect", "03   连接设备");
             AddNavigation(nav, "setup", "04   首次设置");
             AddNavigation(nav, "settings", "05   启动与偏好");
             AddNavigation(nav, "schedule", "06   定时任务");
             AddNavigation(nav, "logs", "07   运行日志");
-            var version = new Label { Dock = DockStyle.Bottom, Height = 72, ForeColor = Color.FromArgb(155, 174, 193), Text = "DanmuCinema v1.2\r\nJellyfin + Danmu", Font = new Font("Segoe UI", 9), Padding = new Padding(0, 16, 0, 0) };
+            var version = new Label { Dock = DockStyle.Bottom, Height = 72, ForeColor = Color.FromArgb(155, 174, 193), Text = "DanmuCinema v1.2\r\nVideo + Danmu", Font = new Font("Segoe UI", 9), Padding = new Padding(0, 16, 0, 0) };
             sidebar.Controls.Add(nav); sidebar.Controls.Add(version); sidebar.Controls.Add(brandHint); sidebar.Controls.Add(brand);
             var workspace = new Panel { Dock = DockStyle.Fill, Padding = new Padding(28, 22, 28, 14) };
             var header = new Panel { Dock = DockStyle.Top, Height = 95 };
             title = new Label { Dock = DockStyle.Top, Height = 47, Font = new Font("Microsoft YaHei UI", 24, FontStyle.Bold), Text = "服务总览" };
-            subtitle = new Label { Dock = DockStyle.Fill, ForeColor = muted, Text = "在电脑管理媒体，在 iPad 原画播放。", Padding = new Padding(2, 4, 0, 0) };
+            subtitle = new Label { Dock = DockStyle.Fill, ForeColor = muted, Text = "在电脑管理媒体，在播放设备上原画播放。", Padding = new Padding(2, 4, 0, 0) };
             header.Controls.Add(subtitle); header.Controls.Add(title);
             footer = new Label { Dock = DockStyle.Bottom, Height = 32, ForeColor = muted, Text = "就绪", Padding = new Padding(0, 10, 0, 0), Font = new Font("Microsoft YaHei UI", 9) };
             body = new Panel { Dock = DockStyle.Fill };
@@ -190,9 +190,9 @@ namespace DanmuCinema
             card.Controls.Add(states); states.BringToFront(); Add(stack, card);
             Add(stack, Actions(ActionButton("启动服务", StartAll, true), ActionButton("停止服务", StopAll, false), ActionButton("打开媒体库", () => { OpenBrowser(LocalUrl + "/web/"); return Completed(); }, false), ActionButton("扫描媒体库", ScanLibrary, false)));
             var guide = Card("第一次使用", 147);
-            var instructions = TextLabel("1  到「首次设置」创建管理员账号、添加视频目录。\r\n2  到「连接 iPad」复制服务器地址，添加 Jellyfin 连接。\r\n3  影片入库后自动匹配弹幕；匹配不准时可以搜索修正。", 86);
+            var instructions = TextLabel("1  到「首次设置」创建管理员账号、添加视频目录。\r\n2  到「连接设备」复制服务器地址，添加媒体服务器连接。\r\n3  影片入库后自动匹配弹幕；匹配不准时可以搜索修正。", 86);
             guide.Controls.Add(instructions); instructions.BringToFront(); Add(stack, guide);
-            Add(stack, TextLabel("视频通过 Jellyfin 直接传输。弹幕接口只传弹幕，不转发蓝光视频。\r\n托盘运行时服务继续工作；在托盘菜单选择「退出并停止服务」即可完全退出。", 66));
+            Add(stack, TextLabel("视频通过媒体服务器直接传输。弹幕接口只传弹幕，不转发蓝光视频。\r\n托盘运行时服务继续工作；在托盘菜单选择「退出并停止服务」即可完全退出。", 66));
         }
         Label StateRow(TableLayoutPanel panel, int row, string name, string value)
         {
@@ -218,14 +218,14 @@ namespace DanmuCinema
             var danmuInner = new Panel { Dock = DockStyle.Fill };
             danmuInner.Controls.Add(Actions(ActionButton("复制弹幕地址", () => { Clipboard.SetText(danmuAddress.Text); return Completed(); }, false)));
             danmuInner.Controls.Add(danmuAddress); danmu.Controls.Add(danmuInner); danmuInner.BringToFront(); Add(stack, danmu);
-            Add(stack, TextLabel("SenPlayer / Filebar：添加服务器 → Jellyfin → 输入上面的地址和你创建的账号。\r\nSenPlayer：设置 → 弹幕设置 → 自定义弹幕 API，填入第二个地址。\r\nFilebar：优先使用媒体服务器弹幕；也可在自定义弹幕服务器中尝试第二个地址。\r\n首次匹配可能需要搜索并选集，具体自动加载行为以 iPad 上的版本为准。", 113));
+            Add(stack, TextLabel("在支持媒体服务器的客户端中添加服务器，填写地址和账号。\r\n支持自定义弹幕 API 的客户端，可填写第二个地址。\r\n也可直接加载视频旁的 XML 弹幕文件。\r\n首次匹配可能需要选择对应集数，自动加载能力取决于客户端。", 113));
             Add(stack, Actions(ActionButton("配置局域网防火墙", ConfigureFirewall, true), ActionButton("打开连接说明", () => { OpenFile(Path.Combine(Paths.Root, "README.md")); return Completed(); }, false)));
-            Add(stack, TextLabel("电脑与 iPad 应连接同一路由器。防火墙规则仅允许专用网络的同一子网。\r\n如果地址有多个，选择电脑实际连接路由器的地址；避免 VPN / 虚拟网卡地址。", 60));
+            Add(stack, TextLabel("电脑与客户端应连接同一路由器。防火墙规则仅允许专用网络的同一子网。\r\n如果地址有多个，选择电脑实际连接路由器的地址；避免 VPN / 虚拟网卡地址。", 60));
         }
         void BuildSetup()
         {
             var stack = Stack(Page("setup"));
-            Add(stack, Actions(ActionButton("安装 / 修复运行组件", InstallComponents, true), ActionButton("启动服务器", StartAll, false), ActionButton("打开 Jellyfin 设置", () => { OpenBrowser(LocalUrl + "/web/#!/dashboard"); return Completed(); }, false)));
+            Add(stack, Actions(ActionButton("安装 / 修复运行组件", InstallComponents, true), ActionButton("启动服务器", StartAll, false), ActionButton("打开服务器设置", () => { OpenBrowser(LocalUrl + "/web/#!/dashboard"); return Completed(); }, false)));
             userName = new TextBox { Text = settings.AdminName, Width = 170, Margin = new Padding(0, 4, 18, 8) };
             password = new TextBox { Width = 230, UseSystemPasswordChar = true, Margin = new Padding(0, 4, 12, 8) };
             var showPassword = new CheckBox { Text = "显示密码", AutoSize = true, Margin = new Padding(0, 6, 0, 8) };
@@ -242,7 +242,7 @@ namespace DanmuCinema
                 Actions(mediaFolder, ActionButton("选择目录", () => { using (var dialog = new FolderBrowserDialog { SelectedPath = mediaFolder.Text }) if (dialog.ShowDialog(this) == DialogResult.OK) mediaFolder.Text = dialog.SelectedPath; return Completed(); }, false)),
                 Actions(new Label { Text = "媒体库名", Width = 76, Height = 32 }, libraryName, new Label { Text = "类型", Width = 45, Height = 32 }, libraryType, ActionButton("添加媒体库", AddMediaLibrary, true)),
                 new Label { Text = "电影和剧集建议使用不同目录，可多次添加。弹幕插件会在视频旁保存 XML。", AutoSize = true, ForeColor = muted }));
-            Add(stack, TextLabel("安装包来自 Jellyfin 官方和开源 Danmu 插件，版本已固定并校验。\r\n服务器账号是 iPad 的登录账号。控制台保存加密登录凭证，不保存你的密码。", 66));
+            Add(stack, TextLabel("运行组件和开源弹幕插件均经过固定版本校验。\r\n服务器账号是客户端的登录账号。控制台保存加密登录凭证，不保存你的密码。", 66));
         }
         TableLayoutPanel SetupCard(string caption, params Control[] controls)
         {
@@ -280,7 +280,7 @@ namespace DanmuCinema
             var playbackInner = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
             playbackInner.Controls.Add(original);
             playbackInner.Controls.Add(Actions(new Label { Text = "视频端口", Width = 90, Height = 32 }, port, new Label { Text = "弹幕端口", Width = 90, Height = 32, Margin = new Padding(20, 0, 0, 0) }, danmuPort));
-            playbackInner.Controls.Add(new Label { Text = "更改端口前请停止服务；更改后需更新 iPad 地址和防火墙规则。", AutoSize = true, ForeColor = muted });
+            playbackInner.Controls.Add(new Label { Text = "更改端口前请停止服务；更改后需更新客户端地址和防火墙规则。", AutoSize = true, ForeColor = muted });
             playback.Controls.Add(playbackInner); playbackInner.BringToFront(); Add(stack, playback);
             Add(stack, Actions(ActionButton("保存设置", SaveSettings, true), ActionButton("打开数据目录", () => { OpenFile(Paths.Data); return Completed(); }, false)));
         }
@@ -296,10 +296,10 @@ namespace DanmuCinema
             selectedPage = key;
             foreach (var pair in pages) pair.Value.Visible = pair.Key == key;
             foreach (var pair in navigation) { pair.Value.BackColor = pair.Key == key ? accent : ink; pair.Value.ForeColor = pair.Key == key ? Color.White : Color.FromArgb(185, 200, 215); }
-            var headings = new Dictionary<string, string> { { "overview", "服务总览" }, { "library", "影片与弹幕" }, { "connect", "连接 iPad" }, { "setup", "首次设置" }, { "settings", "启动与偏好" }, { "schedule", "定时任务" }, { "logs", "运行日志" } };
+            var headings = new Dictionary<string, string> { { "overview", "服务总览" }, { "library", "影片与弹幕" }, { "connect", "连接设备" }, { "setup", "首次设置" }, { "settings", "启动与偏好" }, { "schedule", "定时任务" }, { "logs", "运行日志" } };
             title.Text = headings[key];
-            if (key == "schedule") { subtitle.Text = "设置倒计时或指定时间，托盘中继续运行。"; return; }
-            subtitle.Text = key == "settings" ? "让启动、后台运行和退出按你的习惯工作。" : key == "library" ? "浏览和筛选媒体库，批量选择影片，重新匹配弹幕来源。" : key == "connect" ? "复制地址，在播放器中添加你的电脑。" : key == "setup" ? "一次设置账号与媒体库，之后直接启动即可。" : "在电脑管理媒体，在 iPad 原画播放。";
+            if (key == "schedule") { subtitle.Text = "设置倒计时、指定时间或每周计划，托盘中继续运行。"; return; }
+            subtitle.Text = key == "settings" ? "让启动、后台运行和退出按你的习惯工作。" : key == "library" ? "浏览和筛选媒体库，批量选择影片，重新匹配弹幕来源。" : key == "connect" ? "复制地址，在播放器中添加你的电脑。" : key == "setup" ? "一次设置账号与媒体库，之后直接启动即可。" : "在电脑管理媒体，在播放设备上原画播放。";
         }
         async Task Execute(Func<Task> action)
         {
@@ -407,7 +407,7 @@ namespace DanmuCinema
                 else
                 {
                     var info = await services.Api.PublicInfo();
-                    serverState.Text = "运行中 · Jellyfin " + Json.Text(info, "Version") + " · HTTP " + settings.Port; serverState.ForeColor = accent;
+                    serverState.Text = "运行中 · 服务版本 " + Json.Text(info, "Version") + " · HTTP " + settings.Port; serverState.ForeColor = accent;
                     if (String.IsNullOrEmpty(services.Api.Token)) { pluginState.Text = "请先初始化 / 登录管理员"; sessionState.Text = "尚未登录"; }
                     else
                     {
@@ -417,7 +417,7 @@ namespace DanmuCinema
                             var danmu = plugins.Cast<Dictionary<string, object>>().FirstOrDefault(x => Json.Text(x, "Name").IndexOf("Danmu", StringComparison.OrdinalIgnoreCase) >= 0);
                             pluginState.Text = danmu == null ? "未加载，停止服务后修复组件" : Json.Text(danmu, "Status") + " · " + Json.Text(danmu, "Version");
                             var playing = (await services.Api.Sessions()).Cast<Dictionary<string, object>>().Where(x => Json.Child(x, "NowPlayingItem") != null).ToArray();
-                            sessionState.Text = playing.Length == 0 ? "暂无播放" : String.Join("；", playing.Select(x => Json.Text(x, "Client") + " · " + Json.Text(Json.Child(x, "NowPlayingItem"), "Name") + " · " + Json.Text(Json.Child(x, "PlayState"), "PlayMethod")));
+                            sessionState.Text = playing.Length == 0 ? "暂无播放" : String.Join("；", playing.Select(x => "客户端播放 · " + Json.Text(Json.Child(x, "NowPlayingItem"), "Name") + " · " + Json.Text(Json.Child(x, "PlayState"), "PlayMethod")));
                         }
                         catch { pluginState.Text = "登录已失效或接口异常，请重新登录"; }
                     }
@@ -486,19 +486,8 @@ namespace DanmuCinema
         {
             using (var stream = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("DanmuCinema.AppIcon"))
                 if (stream != null) using (var embedded = new Icon(stream, new Size(64, 64))) return (Icon)embedded.Clone();
-            using (var bitmap = new Bitmap(64, 64))
-            using (var graphics = Graphics.FromImage(bitmap))
-            {
-                graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                graphics.Clear(Color.Transparent);
-                using (var brush = new SolidBrush(Color.FromArgb(19, 128, 112))) graphics.FillEllipse(brush, 2, 2, 60, 60);
-                graphics.FillPolygon(Brushes.White, new[] { new Point(26, 19), new Point(26, 45), new Point(46, 32) });
-                IntPtr handle = bitmap.GetHicon();
-                try { using (var originalIcon = Icon.FromHandle(handle)) return (Icon)originalIcon.Clone(); }
-                finally { DestroyIcon(handle); }
-            }
+            return new Icon(Path.Combine(Paths.Root, "assets", "DanmuCinema.ico"), new Size(64, 64));
         }
-        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr icon);
         protected override void Dispose(bool disposing)
         {
             if (disposing)

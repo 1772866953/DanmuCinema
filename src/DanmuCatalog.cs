@@ -64,7 +64,7 @@ namespace DanmuCinema
             using (var sha = SHA256.Create())
             {
                 byte[] bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(identity));
-                // Exactly representable in JavaScript and safe for iPad's numeric API IDs.
+                // Exactly representable in JavaScript for numeric API IDs.
                 long value = (BitConverter.ToInt64(bytes, 0) & 0x000FFFFFFFFFFFFFL) + 1;
                 return value.ToString(CultureInfo.InvariantCulture);
             }

@@ -65,7 +65,7 @@ namespace DanmuCinema
         {
             switch (action)
             {
-                case PowerAction.StopServices: return "停止视频和弹幕服务，iPad 播放将中断，电脑保持运行。";
+                case PowerAction.StopServices: return "停止视频和弹幕服务，客户端播放将中断，电脑保持运行。";
                 case PowerAction.Restart: return "强制关闭应用并重新启动，请提前保存文件。";
                 case PowerAction.Sleep: return "进入低功耗睡眠状态，唤醒后继续使用。";
                 case PowerAction.Hibernate: return "将当前状态保存到磁盘，再关闭电源。";

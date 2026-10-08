@@ -44,7 +44,7 @@ namespace DanmuCinema.Desktop
             if (File.Exists(iconFile)) View.Icon = System.Windows.Media.Imaging.BitmapFrame.Create(new Uri(iconFile));
             var nav = (StackPanel)View.FindName("Navigation");
             string[] keys = { "overview", "library", "tasks", "connect", "setup", "settings", "schedule", "cache", "logs" };
-            string[] titles = { "服务总览", "影片与弹幕", "下载任务", "连接 iPad", "首次设置", "启动与偏好", "定时任务", "缓存管理", "运行日志" };
+            string[] titles = { "服务总览", "影片与弹幕", "下载任务", "连接设备", "首次设置", "启动与偏好", "定时任务", "缓存管理", "运行日志" };
             string[] icons = { "\uE80F", "\uE8B7", "\uE896", "\uE8EA", "\uE713", "\uE115", "\uE823", "\uE8B7", "\uE9D9" };
             for (int i = 0; i < keys.Length; i++)
             {
@@ -179,9 +179,9 @@ namespace DanmuCinema.Desktop
             CloseWorkspace(false);
             SavePageState(); ClearPage(); session.Page = key;
             foreach (var pair in navigation) { pair.Value.Background = Ui.Brush(pair.Key == key ? "#344668" : "#0014243A"); pair.Value.Foreground = Ui.Brush(pair.Key == key ? "#FFFFFF" : "#AEBED2"); }
-            var titles = new Dictionary<string, string> { { "overview", "服务总览" }, { "library", "影片与弹幕" }, { "tasks", "下载任务" }, { "connect", "连接 iPad" }, { "setup", "首次设置" }, { "settings", "启动与偏好" }, { "schedule", "定时任务" }, { "cache", "缓存管理" }, { "logs", "运行日志" } };
+            var titles = new Dictionary<string, string> { { "overview", "服务总览" }, { "library", "影片与弹幕" }, { "tasks", "下载任务" }, { "connect", "连接设备" }, { "setup", "首次设置" }, { "settings", "启动与偏好" }, { "schedule", "定时任务" }, { "cache", "缓存管理" }, { "logs", "运行日志" } };
             ((TextBlock)View.FindName("Heading")).Text = titles[key];
-            ((TextBlock)View.FindName("Subtitle")).Text = key == "tasks" ? "提前准备、查看进度，集中处理需要确认的影片。" : key == "library" ? "浏览媒体库，选择影片，为每一集找到合适的弹幕。" : key == "schedule" ? "倒计时或指定时间，托盘中继续运行。" : key == "connect" ? "连接你的电脑，在 iPad 上原画播放。" : key == "cache" ? "先读本地数据，减少官方接口请求。" : key == "settings" ? "让启动、播放和后台运行按你的习惯工作。" : key == "setup" ? "设置账号和媒体库，开启你的家庭影院。" : "在电脑管理媒体，在 iPad 原画播放。";
+            ((TextBlock)View.FindName("Subtitle")).Text = key == "tasks" ? "提前准备、查看进度，集中处理需要确认的影片。" : key == "library" ? "浏览媒体库，选择影片，为每一集找到合适的弹幕。" : key == "schedule" ? "倒计时、指定时间或每周计划，托盘中继续运行。" : key == "connect" ? "连接你的电脑，在播放设备上原画播放。" : key == "cache" ? "先读本地数据，减少官方接口请求。" : key == "settings" ? "让启动、播放和后台运行按你的习惯工作。" : key == "setup" ? "设置账号和媒体库，开启你的家庭影院。" : "在电脑管理媒体，在播放设备上原画播放。";
             page = key == "library" ? BuildLibrary() : key == "tasks" ? BuildTasks() : key == "overview" ? BuildOverview() : key == "connect" ? BuildConnect() : key == "setup" ? BuildSetup() : key == "settings" ? BuildSettings() : key == "schedule" ? BuildSchedule() : key == "cache" ? BuildCache() : BuildLogs();
             host.Content = page; Ui.Animate(host); Ui.AnimateAccent((Border)View.FindName("PageAccent")); Render();
             if (key == "schedule") viewTimer.Start(); else viewTimer.Stop();
@@ -229,8 +229,8 @@ namespace DanmuCinema.Desktop
             string[] labels = { "视频服务器", "弹幕接口", "弹幕插件", "播放会话" }; TextBlock[] values = { server, danmu, plugin, playback };
             for (int i = 0; i < labels.Length; i++) { state.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); var label = Ui.Label(labels[i]); values[i].Margin = new Thickness(0, 0, 0, 16); Grid.SetRow(label, i); Grid.SetRow(values[i], i); Grid.SetColumn(values[i], 1); state.Children.Add(label); state.Children.Add(values[i]); }
             return Scroll(Ui.Card("服务状态", state, Ui.Row(Command("启动服务", controller.StartAll, true), Command("停止服务", controller.StopAll), Ui.Button("打开媒体库", () => DesktopController.Open(controller.LocalUrl + "/web/")), Command("扫描媒体库", controller.ScanLibrary))),
-                Ui.Card("开始使用", Ui.Text("01   在「首次设置」创建账号、添加视频目录。\n02   在「连接 iPad」复制服务器地址。\n03   在「影片与弹幕」选择来源，匹配并下载弹幕。", "Note")),
-                Ui.Text("视频由 Jellyfin 直接传输。关闭到托盘后，播放服务、下载和定时任务继续运行。", "Note"));
+                Ui.Card("开始使用", Ui.Text("01   在「首次设置」创建账号、添加视频目录。\n02   在「连接设备」复制服务器地址。\n03   在「影片与弹幕」选择来源，匹配并下载弹幕。", "Note")),
+                Ui.Text("视频由媒体服务器直接传输。关闭到托盘后，播放服务、下载和定时任务继续运行。", "Note"));
         }
         FrameworkElement BuildConnect()
         {
@@ -242,21 +242,21 @@ namespace DanmuCinema.Desktop
             return Scroll(Ui.Row(Ui.Label("局域网地址"), network, Ui.Button("刷新地址", () => { network.ItemsSource = NetworkInfo.Addresses(); network.SelectedIndex = 0; update(); })),
                 Ui.Card("视频服务器地址", video, Ui.Row(Ui.Button("复制地址", () => Clipboard.SetText(video.Text)))),
                 Ui.Card("自定义弹幕 API", comments, Ui.Row(Ui.Button("复制弹幕地址", () => Clipboard.SetText(comments.Text)))),
-                Ui.Card("在 iPad 上连接", Ui.Text("SenPlayer / Filebar：添加服务器 → Jellyfin → 输入视频服务器地址和你创建的账号。\nSenPlayer：设置 → 弹幕设置 → 自定义弹幕 API，填入上面的弹幕地址。\nFilebar：优先使用媒体服务器弹幕，也可尝试自定义弹幕服务器。", "Note"), Ui.Row(Command("配置局域网防火墙", () => controller.RunScript("configure-firewall.ps1", true), true), Ui.Button("打开连接说明", () => DesktopController.Open(Path.Combine(Paths.Root, "README.md"))))),
-                Ui.Text("电脑和 iPad 应连接同一路由器。多个地址时，请选择实际连接路由器的网卡地址。", "Note"));
+                Ui.Card("连接播放设备", Ui.Text("在支持媒体服务器的客户端中添加服务器，填写视频服务器地址和账号。\n支持自定义弹幕 API 的客户端，可在弹幕设置中填写上面的弹幕地址。\n也可直接加载视频旁的 XML 弹幕文件，具体能力取决于客户端。", "Note"), Ui.Row(Command("配置局域网防火墙", () => controller.RunScript("configure-firewall.ps1", true), true), Ui.Button("打开连接说明", () => DesktopController.Open(Path.Combine(Paths.Root, "README.md"))))),
+                Ui.Text("电脑和客户端应连接同一路由器。多个地址时，请选择实际连接路由器的网卡地址。", "Note"));
         }
         FrameworkElement BuildSetup()
         {
             var name = DraftText("admin", controller.Settings.AdminName, 200); var password = new PasswordBox { Width = 230 }; System.Windows.Automation.AutomationProperties.SetName(password, "管理员密码");
             var folder = DraftText("folder", controller.Settings.MediaFolder, 420); var libraryName = DraftText("library-name", controller.Settings.LibraryName, 200);
             var type = DraftCombo("library-type", new[] { "电影", "电视剧 / 动画" }, controller.Settings.LibraryType == "tvshows" ? 1 : 0, 190);
-            return Scroll(Ui.Row(Command("安装 / 修复运行组件", () => controller.RunScript("install-components.ps1", false), true), Command("启动服务器", controller.StartAll), Ui.Button("打开 Jellyfin 设置", () => DesktopController.Open(controller.LocalUrl + "/web/#!/dashboard"))),
-                Ui.Card("管理员账号", Ui.Text("这是 iPad 连接服务器时使用的账号；密码不会保存到配置中。", "Note"), Ui.Row(Ui.Label("账号"), name, Ui.Label("密码"), password),
+            return Scroll(Ui.Row(Command("安装 / 修复运行组件", () => controller.RunScript("install-components.ps1", false), true), Command("启动服务器", controller.StartAll), Ui.Button("打开服务器设置", () => DesktopController.Open(controller.LocalUrl + "/web/#!/dashboard"))),
+                Ui.Card("管理员账号", Ui.Text("这是客户端连接服务器时使用的账号；密码不会保存到配置中。", "Note"), Ui.Row(Ui.Label("账号"), name, Ui.Label("密码"), password),
                     Ui.Row(Command("初始化 / 登录管理员", async () => { string user = name.Text.Trim(), secret = password.Password; if (!controller.Services.OwnsProcess) await controller.StartAll(); await controller.Services.Api.Initialize(user, secret); password.Clear(); await controller.Services.Api.SetOriginalPolicy(controller.Settings.PreferOriginal); }, true))),
                 Ui.Card("视频目录", Ui.Row(folder, Ui.Button("选择目录", () => { using (var dialog = new Forms.FolderBrowserDialog { SelectedPath = folder.Text }) if (dialog.ShowDialog(new NativeOwner(View)) == Forms.DialogResult.OK) folder.Text = dialog.SelectedPath; })),
                     Ui.Row(Ui.Label("媒体库名"), libraryName, type), Ui.Row(Command("添加媒体库", async () => { string path = folder.Text.Trim(), title = libraryName.Text.Trim(), kind = type.SelectedIndex == 1 ? "tvshows" : "movies"; await controller.Services.Api.AddLibrary(path, title, kind); controller.Settings.MediaFolder = path; controller.Settings.LibraryName = title; controller.Settings.LibraryType = kind; SettingsStore.Save(controller.Settings); }, true)),
                     Ui.Text("电影和剧集建议使用不同目录，可多次添加。弹幕 XML 保存在视频旁边。", "Note")),
-                Ui.Text("运行组件来自 Jellyfin 官方和开源弹幕插件，下载时校验固定版本。", "Note"));
+                Ui.Text("运行组件和开源弹幕插件均经过固定版本校验。", "Note"));
         }
         FrameworkElement BuildSettings()
         {
@@ -266,7 +266,7 @@ namespace DanmuCinema.Desktop
             var original = DraftCheck("original", "保留原画：禁止视频转码，允许重新封装与音频转换", controller.Settings.PreferOriginal);
             var port = DraftText("port", controller.Settings.Port.ToString(), 110); var danmuPort = DraftText("danmu-port", controller.Settings.DanmuPort.ToString(), 110);
             return Scroll(Ui.Card("启动与关闭", auto, launch, Ui.Row(Ui.Label("关闭窗口时"), close), Ui.Text("最小化按钮仍最小化到任务栏；托盘菜单的「退出并停止服务」完全退出。\n后台启动不创建主窗口；从托盘打开时恢复上次的大小和操作位置。", "Note")),
-                Ui.Card("播放与连接", original, Ui.Row(Ui.Label("视频端口"), port, Ui.Label("弹幕端口"), danmuPort), Ui.Text("更改端口前请停止服务；修改后需同步更新 iPad 地址和防火墙规则。", "Note")),
+                Ui.Card("播放与连接", original, Ui.Row(Ui.Label("视频端口"), port, Ui.Label("弹幕端口"), danmuPort), Ui.Text("更改端口前请停止服务；修改后需同步更新客户端地址和防火墙规则。", "Note")),
                 Ui.Row(Command("保存设置", async () => { int a, b; if (!Int32.TryParse(port.Text, out a) || !Int32.TryParse(danmuPort.Text, out b)) throw new ArgumentException("请输入有效端口。"); await controller.SavePreferences(a, b, close.SelectedIndex == 0, launch.IsChecked == true, original.IsChecked == true, auto.IsChecked == true); }, true), Ui.Button("打开数据目录", () => DesktopController.Open(Paths.Data))));
         }
         FrameworkElement BuildLogs()
@@ -280,21 +280,31 @@ namespace DanmuCinema.Desktop
             countdown = new TextBlock { Text = "00:00:00", FontFamily = new FontFamily("Consolas"), FontSize = 40, Foreground = (Brush)Ui.Resource("Accent"), Margin = new Thickness(0, 0, 0, 6) };
             scheduleStatus = Ui.Text("", "Note"); scheduleTarget = Ui.Text("", "Note"); scheduleProgress = new ProgressBar { Height = 5, Maximum = 1, Foreground = (Brush)Ui.Resource("Accent"), Margin = new Thickness(0, 8, 0, 0) };
             scheduleStatus.Margin = scheduleTarget.Margin = new Thickness(0, 4, 0, 4);
-            var mode = DraftCombo("timer-mode", new[] { "倒计时", "指定时间" }, 0, 190);
+            var mode = DraftCombo("timer-mode", new[] { "倒计时", "指定时间", "每周计划" }, 0, 190);
             var hours = DraftText("hours", "0", 80); var minutes = DraftText("minutes", "30", 80); var seconds = DraftText("seconds", "0", 80);
             var delayRow = Ui.Row(hours, Ui.Label("小时"), minutes, Ui.Label("分钟"), seconds, Ui.Label("秒"));
             var presets = Ui.Row(); foreach (int v in new[] { 15, 30, 60, 120 }) { int value = v; presets.Children.Add(Ui.Button(v < 60 ? v + " 分钟" : v / 60 + " 小时", () => { hours.Text = (value / 60).ToString(); minutes.Text = (value % 60).ToString(); seconds.Text = "0"; })); }
-            var date = DraftText("date", DateTime.Now.AddMinutes(30).ToString("yyyy-MM-dd"), 150); var time = DraftText("time", DateTime.Now.AddMinutes(30).ToString("HH:mm:ss"), 130); var dateRow = Ui.Row(Ui.Label("执行日期"), date, Ui.Label("时间"), time);
-            Action setMode = () => { delayRow.Visibility = presets.Visibility = mode.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed; dateRow.Visibility = mode.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed; }; mode.SelectionChanged += (s, e) => setMode(); setMode();
-            var actions = DraftCombo("timer-action", Enum.GetValues(typeof(PowerAction)).Cast<PowerAction>().Select(PowerActions.Name).ToArray(), 0, 230); var description = Ui.Text(PowerActions.Description((PowerAction)actions.SelectedIndex), "Note"); actions.SelectionChanged += (s, e) => description.Text = PowerActions.Description((PowerAction)actions.SelectedIndex);
+            var date = DraftText("date", DateTime.Now.AddMinutes(30).ToString("yyyy-MM-dd"), 150); var time = DraftText("time", DateTime.Now.AddMinutes(30).ToString("HH:mm:ss"), 130); var dateRow = Ui.Row(Ui.Label("执行日期"), date); var timeRow = Ui.Row(Ui.Label("执行时间"), time);
+            var days = WeeklyPlan.DayNames.Select((name, index) => DraftCheck("timer-day-" + index, name, true)).ToArray();
+            var weeklyRow = Ui.Stack(Ui.Row(days.Cast<UIElement>().ToArray()), Ui.Text("勾选日期共用上方执行时间；完成后自动安排下一次。退出程序会取消计划。", "Note"));
+            System.Windows.Automation.AutomationProperties.SetName(mode, "定时方式"); System.Windows.Automation.AutomationProperties.SetName(time, "定时执行时间");
+            Action setMode = () => { delayRow.Visibility = presets.Visibility = mode.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed; dateRow.Visibility = mode.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed; timeRow.Visibility = mode.SelectedIndex > 0 ? Visibility.Visible : Visibility.Collapsed; weeklyRow.Visibility = mode.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed; }; mode.SelectionChanged += (s, e) => setMode(); setMode();
+            var actions = DraftCombo("timer-action", Enum.GetValues(typeof(PowerAction)).Cast<PowerAction>().Select(PowerActions.Name).ToArray(), (int)PowerAction.Hibernate, 230); var description = Ui.Text(PowerActions.Description((PowerAction)actions.SelectedIndex), "Note"); actions.SelectionChanged += (s, e) => description.Text = PowerActions.Description((PowerAction)actions.SelectedIndex);
+            System.Windows.Automation.AutomationProperties.SetName(actions, "到时操作");
             var awake = DraftCheck("timer-awake", "定时期间阻止自动睡眠（屏幕仍可熄灭）", false);
-            scheduleEditor = Ui.Stack(Ui.Row(Ui.Label("计时方式"), mode), delayRow, presets, dateRow, Ui.Row(Ui.Label("到时操作"), actions), description, awake);
+            scheduleEditor = Ui.Stack(Ui.Row(Ui.Label("计时方式"), mode), delayRow, presets, dateRow, timeRow, weeklyRow, Ui.Row(Ui.Label("到时操作"), actions), description, awake);
             scheduleStart = Ui.Button("开始定时", () =>
             {
                 try
                 {
                     TimeSpan? delay = null; DateTime? target = null;
                     if (mode.SelectedIndex == 0) { int h, m, s; if (!Int32.TryParse(hours.Text, out h) || !Int32.TryParse(minutes.Text, out m) || !Int32.TryParse(seconds.Text, out s) || h < 0 || h > 720 || m < 0 || m > 59 || s < 0 || s > 59) throw new ArgumentException("请填写有效的小时、分钟和秒。"); delay = TimeSpan.FromHours(h) + TimeSpan.FromMinutes(m) + TimeSpan.FromSeconds(s); }
+                    else if (mode.SelectedIndex == 2)
+                    {
+                        int mask = days.Select((day, index) => day.IsChecked == true ? 1 << index : 0).Aggregate(0, (left, right) => left | right);
+                        TimeSpan clockTime; if (!TimeSpan.TryParseExact(time.Text, @"hh\:mm\:ss", System.Globalization.CultureInfo.InvariantCulture, out clockTime)) throw new ArgumentException("请使用 HH:mm:ss 格式填写执行时间。");
+                        controller.StartWeeklySchedule(mask, clockTime, (PowerAction)actions.SelectedIndex, awake.IsChecked == true); return;
+                    }
                     else { DateTime local; if (!DateTime.TryParseExact(date.Text + " " + time.Text, "yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out local)) throw new ArgumentException("请使用 yyyy-MM-dd 和 HH:mm:ss 格式填写时间。"); target = local; }
                     controller.StartSchedule(delay, target, (PowerAction)actions.SelectedIndex, awake.IsChecked == true);
                 }
@@ -314,7 +324,7 @@ namespace DanmuCinema.Desktop
             scheduleEditor.IsEnabled = scheduleStart.IsEnabled = !locked; scheduleCancel.IsEnabled = scheduler.Active;
             countdown.Text = Scheduler.FormatRemaining(scheduler.Remaining);
             scheduleStatus.Text = scheduler.Active ? PowerActions.Name(scheduler.Action) + (controller.Busy || controller.BatchRunning || controller.Loading ? " · 等待当前操作完成后提醒，仍可取消" : scheduler.State == ScheduleState.Warning ? " · 即将执行，仍可取消" : " · 定时进行中") : controller.ScheduleStatus;
-            scheduleTarget.Text = scheduler.Active ? "预计执行 " + scheduler.Target.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") : "关闭到托盘后仍会继续计时。";
+            scheduleTarget.Text = scheduler.Active ? (scheduler.Weekly ? "每周 " + scheduler.WeeklyLabel + "\n下次执行 " : "预计执行 ") + scheduler.Target.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") : "关闭到托盘后仍会继续计时。";
             scheduleProgress.Value = scheduler.Active ? Math.Max(0, Math.Min(1, 1 - scheduler.Remaining.TotalSeconds / Math.Max(1, controller.ScheduleInitial))) : scheduler.State == ScheduleState.Completed ? 1 : 0;
         }
         void Render()
