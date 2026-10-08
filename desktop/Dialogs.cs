@@ -17,6 +17,7 @@ namespace DanmuCinema.Desktop
     {
         protected readonly Grid Body;
         Grid animatedSurface;
+        readonly Image backdrop = new Image { IsHitTestVisible = false, Stretch = Stretch.Fill };
         bool fadeClosing, finishClose, alreadyClosed;
         bool? pendingResult;
         internal void CloseImmediately() { finishClose = true; Close(); }
@@ -31,7 +32,10 @@ namespace DanmuCinema.Desktop
                 if (!fadeClosing)
                 {
                     fadeClosing = true; pendingResult = DialogResult;
-                    SurfaceMotion.FadeOut(animatedSurface, () => { if (alreadyClosed) return; finishClose = true; if (pendingResult.HasValue) DialogResult = pendingResult; if (!alreadyClosed) Close(); });
+                    backdrop.Source = DialogBackdrop.Capture(this);
+                    // A close during the first transparent frame may finish the
+                    // fade synchronously. Always unwind Closing before closing again.
+                    SurfaceMotion.FadeOut(animatedSurface, () => Dispatcher.BeginInvoke(new Action(() => { if (alreadyClosed) return; finishClose = true; if (pendingResult.HasValue) DialogResult = pendingResult; if (!alreadyClosed) Close(); })));
                 }
                 return;
             }
@@ -51,15 +55,17 @@ namespace DanmuCinema.Desktop
             WindowChrome.SetWindowChrome(this, new WindowChrome { CaptionHeight = 48, ResizeBorderThickness = new Thickness(6), GlassFrameThickness = new Thickness(0), CornerRadius = new CornerRadius(0), UseAeroCaptionButtons = false });
             ShowInTaskbar = false;
             var outer = new Grid { Background = (Brush)Ui.Resource("Canvas") }; outer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) }); outer.RowDefinitions.Add(new RowDefinition());
-            animatedSurface = outer;
             var atmosphere = Ui.Atmosphere(); Grid.SetRowSpan(atmosphere, 2); outer.Children.Add(atmosphere);
             var header = new Grid { Background = (Brush)Ui.Resource("Surface") }; header.Children.Add(new TextBlock { Text = title, Margin = new Thickness(22, 0, 60, 0), FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis, TextWrapping = TextWrapping.NoWrap });
             var accent = Ui.AccentLine(); accent.Margin = new Thickness(22, 0, 0, 0); accent.VerticalAlignment = VerticalAlignment.Bottom; header.Children.Add(accent);
             var close = Ui.Button("", Close); Ui.ConfigureCaption(close, "close"); close.HorizontalAlignment = HorizontalAlignment.Right; WindowChrome.SetIsHitTestVisibleInChrome(close, true); header.Children.Add(close); outer.Children.Add(header);
             Body = new Grid { Margin = new Thickness(22) }; Grid.SetRow(Body, 1); outer.Children.Add(Body);
-            Content = new Border { Child = outer, BorderBrush = (Brush)Ui.Resource("Line"), BorderThickness = new Thickness(1) };
-            SourceInitialized += (s, e) => Ui.EnableWindowTransitions(this);
-            Loaded += (s, e) => { if (Owner != null) Icon = Owner.Icon; SurfaceMotion.FadeIn(outer); Ui.AnimateAccent(accent); };
+            animatedSurface = new Grid(); animatedSurface.Children.Add(new Border { Child = outer, BorderBrush = (Brush)Ui.Resource("Line"), BorderThickness = new Thickness(1) });
+            var layers = new Grid { Background = (Brush)Ui.Resource("Canvas") }; layers.Children.Add(backdrop); layers.Children.Add(animatedSurface); Content = layers;
+            SourceInitialized += (s, e) => { Ui.EnableWindowTransitions(this); Ui.SuppressDialogCloseTransition(this); };
+            // Arm before Show; run only once the view has completed its first layout.
+            SurfaceMotion.FadeIn(animatedSurface, () => { if (!fadeClosing) backdrop.Source = null; });
+            Loaded += (s, e) => { if (Owner != null) Icon = Owner.Icon; if (SystemParameters.ClientAreaAnimation) backdrop.Source = DialogBackdrop.Capture(this); Ui.AnimateAccent(accent); };
             Window parent = null; bool returnFocus = false;
             Closing += (s, e) => { parent = Owner; returnFocus = Ui.IsForeground(this); };
             Closed += (s, e) =>
@@ -67,6 +73,7 @@ namespace DanmuCinema.Desktop
                 alreadyClosed = true;
                 Ui.ReleaseVisualTree(animatedSurface); Body.Children.Clear();
                 animatedSurface.Children.Clear(); animatedSurface = null; Content = null;
+                backdrop.Source = null;
                 // Wait for native destruction/owned-window activation to unwind.
                 // Capture the direct parent before WPF detaches ownership.
                 Window target = parent; bool activate = returnFocus; parent = null;

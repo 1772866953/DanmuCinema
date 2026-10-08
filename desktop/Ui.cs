@@ -174,7 +174,7 @@ namespace DanmuCinema.Desktop
             var button = root as Button;
             if (button != null) { button.ClearValue(ButtonActionProperty); button.Click -= InvokeButtonAction; }
             var framework = root as FrameworkElement;
-            if (framework != null) { framework.BeginAnimation(FrameworkElement.WidthProperty, null); framework.BeginAnimation(FrameworkElement.MaxHeightProperty, null); }
+            if (framework != null) { SurfaceMotion.Cancel(framework); framework.BeginAnimation(FrameworkElement.WidthProperty, null); framework.BeginAnimation(FrameworkElement.MaxHeightProperty, null); }
             var border = root as Border;
             var background = border == null ? null : border.Background as SolidColorBrush;
             if (background != null && !background.IsFrozen) background.BeginAnimation(SolidColorBrush.ColorProperty, null);

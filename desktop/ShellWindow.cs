@@ -170,7 +170,7 @@ namespace DanmuCinema.Desktop
         { if ((WorkspaceVisible || session.Page == "library" || session.Page == "cache") && (e.ChangedButton == MouseButton.XButton1 || e.ChangedButton == MouseButton.XButton2)) { NavigatePageHistory(e.ChangedButton == MouseButton.XButton2); e.Handled = true; } }
         void NavigatePageHistory(bool forward)
         {
-            if (WorkspaceVisible) { if (forward && controller.BatchPlan != null) MountBatch(); else if (!forward && session.Match != null) MountMatch(false); else if (!forward) CloseWorkspace(false); return; }
+            if (WorkspaceVisible) { if (forward && controller.BatchPlan != null) MountBatch(); else if (!forward && session.Match != null) MountMatch(false); else if (!forward) RequestWorkspaceClose(); return; }
             var cachePage = page as CachePage; if (cachePage != null) cachePage.NavigateHistory(forward); else NavigateHistory(forward);
         }
         public void Navigate(string key)

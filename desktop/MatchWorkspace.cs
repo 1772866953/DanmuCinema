@@ -16,9 +16,9 @@ namespace DanmuCinema.Desktop
         Button workspaceSources, workspaceDownloads;
         bool workspaceClosing;
         internal bool WorkspaceVisible { get { return workspace != null; } }
-        void EnsureWorkspace()
+        bool EnsureWorkspace()
         {
-            if (workspace != null) return;
+            if (workspace != null) return false;
             var layout = new Grid(); layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); layout.RowDefinitions.Add(new RowDefinition());
             workspaceBody = new Grid { Margin = new Thickness(20, 8, 20, 20) };
             var header = new Grid { Margin = new Thickness(20, 12, 10, 0) }; header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); header.ColumnDefinitions.Add(new ColumnDefinition()); header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -33,35 +33,52 @@ namespace DanmuCinema.Desktop
             var drag = workspace.DragHandle(); Grid.SetColumn(drag, 1); header.Children.Add(drag);
             ((Grid)View.FindName("WorkArea")).Children.Add(workspaceLayer); SurfaceMotion.FadeIn(workspace);
             var line = Ui.AccentLine(); line.VerticalAlignment = VerticalAlignment.Top; line.HorizontalAlignment = HorizontalAlignment.Left; line.Margin = new Thickness(20, 0, 0, 0); layout.Children.Add(line); Ui.AnimateAccent(line);
+            return true;
         }
         void MountMatch(bool autoSearch)
         {
-            if (workspaceClosing) return; EnsureWorkspace();
+            if (workspaceClosing) return; bool created = EnsureWorkspace();
             if (session.Match == null) { Navigate("tasks"); return; }
             session.Match.Open = true;
             if (matchView == null) { matchView = new MatchView(controller, session.Match, autoSearch, ShowBatch); workspaceBody.Children.Add(matchView); }
-            matchView.Visibility = Visibility.Visible; if (batchView != null) batchView.Visibility = Visibility.Collapsed;
             workspaceSources.IsEnabled = true; workspaceSources.Style = (Style)Ui.Resource("Primary"); workspaceDownloads.Style = (Style)Ui.Resource("TextAction");
-            SurfaceMotion.FadeIn(matchView);
+            SwitchWorkspaceView(matchView, created);
         }
         void MountBatch()
         {
-            if (workspaceClosing) return; EnsureWorkspace(); if (matchView != null) matchView.Visibility = Visibility.Collapsed;
+            if (workspaceClosing) return; bool created = EnsureWorkspace();
             if (batchView == null) { batchView = new BatchView(controller); workspaceBody.Children.Add(batchView); }
-            batchView.Visibility = Visibility.Visible; workspaceSources.IsEnabled = session.Match != null;
+            workspaceSources.IsEnabled = session.Match != null;
             workspaceSources.Style = (Style)Ui.Resource("TextAction"); workspaceDownloads.Style = (Style)Ui.Resource("Primary");
-            SurfaceMotion.FadeIn(batchView); controller.Publish();
+            SwitchWorkspaceView(batchView, created); controller.Publish();
+        }
+        void SwitchWorkspaceView(FrameworkElement incoming, bool created)
+        {
+            var outgoing = workspaceBody.Children.OfType<FrameworkElement>().FirstOrDefault(x => x != incoming && x.Visibility == Visibility.Visible);
+            if (!created && outgoing == null && incoming.IsVisible) return;
+            var pane = workspace;
+            Action mount = () =>
+            {
+                if (!Object.ReferenceEquals(workspace, pane)) return;
+                if (outgoing != null) { outgoing.Visibility = Visibility.Collapsed; SurfaceMotion.Cancel(outgoing); outgoing.Opacity = 1; }
+                workspaceClosing = false; incoming.Visibility = Visibility.Visible;
+                if (!created) SurfaceMotion.FadeIn(incoming);
+            };
+            // A newly created pane fades as one surface; never multiply it by a
+            // second child-opacity animation. Nested views share the same timings.
+            if (!created && outgoing != null) { incoming.Visibility = Visibility.Collapsed; workspaceClosing = true; SurfaceMotion.FadeOut(outgoing, mount); }
+            else mount();
         }
         internal void RequestWorkspaceClose()
         {
-            if (workspace == null || workspaceClosing) return; workspaceClosing = true;
+            if (workspace == null || workspaceClosing) return;
             if (batchView != null && batchView.Visibility == Visibility.Visible && matchView != null)
             {
-                var outgoing = batchView; SurfaceMotion.FadeOut(outgoing, () => { if (workspace == null || !workspaceClosing) return; outgoing.BeginAnimation(UIElement.OpacityProperty, null); workspaceClosing = false; MountMatch(false); });
+                MountMatch(false);
             }
             else
             {
-                var outgoing = workspace; SurfaceMotion.FadeOut(outgoing, () => { if (Object.ReferenceEquals(workspace, outgoing)) CloseWorkspace(false); });
+                workspaceClosing = true; var outgoing = workspace; SurfaceMotion.FadeOut(outgoing, () => { if (Object.ReferenceEquals(workspace, outgoing)) CloseWorkspace(false); });
             }
         }
         void CloseWorkspace(bool releasingWindow)

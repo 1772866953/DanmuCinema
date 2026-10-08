@@ -70,7 +70,7 @@ namespace DanmuCinema.Desktop
                 Subscribe(localTarget, ComboBox.SelectionChangedEvent, new SelectionChangedEventHandler((s, e) => { var choice = localTarget.SelectedItem as Choice; state.Item = choice == null ? null : choice.Data; }));
                 input.Children.Add(Ui.Row(Ui.Label("本地季度"), localTarget)); scopes.SelectedIndex = 1; state.Scope = DanmuMatchScope.Season;
             }
-            Subscribe(scopes, TabControl.SelectionChangedEvent, new SelectionChangedEventHandler((s, e) => { var tab = scopes.SelectedItem as TabItem; if (tab != null) { state.Scope = (DanmuMatchScope)tab.Tag; Ui.Animate((FrameworkElement)tab.Content); } }));
+            Subscribe(scopes, TabControl.SelectionChangedEvent, new SelectionChangedEventHandler((s, e) => { var tab = scopes.SelectedItem as TabItem; if (tab != null && Object.ReferenceEquals(e.OriginalSource, scopes)) { state.Scope = (DanmuMatchScope)tab.Tag; SurfaceMotion.FadeIn((FrameworkElement)tab.Content); } }));
             Grid.SetRow(scopes, 2); Body.Children.Add(scopes); status = Ui.Text(state.Status, "Note"); Grid.SetRow(status, 3); Body.Children.Add(status);
             Subscribe(service, ComboBox.SelectionChangedEvent, new SelectionChangedEventHandler(async (s, e) => { state.ServiceId = service.SelectedItem == null ? null : Json.Text(((Choice)service.SelectedItem).Data, "Id"); if (!closed && IsVisible && !controller.Busy && !String.IsNullOrWhiteSpace(state.Keyword)) await Work(Search); }));
             controller.Changed += Render;
@@ -199,6 +199,7 @@ namespace DanmuCinema.Desktop
         readonly TextBlock status;
         readonly CheckBox keep;
         readonly Button start, stop, retry, resume;
+        readonly StackPanel feedback;
         readonly ProgressBar progress;
         readonly TextBlock heading;
         List<BatchEntry> renderedPlan;
@@ -219,10 +220,10 @@ namespace DanmuCinema.Desktop
             // complete window during a long batch after the main window enters the tray.
             start = Ui.Button("开始全部下载", () => { grid.CommitEdit(DataGridEditingUnit.Cell, true); grid.CommitEdit(DataGridEditingUnit.Row, true); controller.StartBatch(); }, true);
             stop = Ui.Button("停止下载", controller.CancelBatch);
-            retry = Ui.Button("仅重试失败项", () => controller.RetryBatch(true)); resume = Ui.Button("继续未完成", () => controller.RetryBatch(false));
+            retry = Ui.Button("仅重试失败项", () => { SurfaceMotion.FadeIn(feedback); controller.RetryBatch(true); }); resume = Ui.Button("继续未完成", () => { SurfaceMotion.FadeIn(feedback); controller.RetryBatch(false); });
             var actions = Ui.Row(keep, start, stop, retry, resume); actions.Margin = new Thickness(0, 16, 0, 0); Grid.SetRow(actions, 2); Body.Children.Add(actions);
             status = Ui.Text(controller.BatchStatus, "Note"); progress = new ProgressBar { Height = 5, Maximum = 1 };
-            var feedback = Ui.Stack(progress, status); Grid.SetRow(feedback, 3); Body.Children.Add(feedback);
+            feedback = Ui.Stack(progress, status); Grid.SetRow(feedback, 3); Body.Children.Add(feedback);
             controller.Changed += Render;
             Render();
         }
