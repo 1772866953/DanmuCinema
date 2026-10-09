@@ -1,0 +1,17 @@
+﻿DanmuCinema 对应源码与第三方许可材料
+
+公开发布时，请将 DanmuCinema-Corresponding-Sources-<版本号>.zip 与同版本安装 EXE 放在同一下载位置，供所有接收者免费取得。用户安装和运行只需 EXE。保留整个源码 ZIP、许可证和构建说明，不要只发布其中某一个项目的源码。
+
+安装 EXE 内的 licenses/sources 保留核心项目的源码及控制台本次构建快照。完整源码 ZIP 额外提供：FFmpeg 的外部静态依赖、shaderc 的 DEPS 依赖、libplacebo 子模块、LLVM 22.1.8 的 libc++/libc++abi/libunwind 运行库，以及 BDInfo、TagLibSharp 和 UTF.Unknown 源码。源文件及补丁保留原作者声明，依各自许可使用。
+
+Jellyfin Server/Web：v12.1，来自 jellyfin 官方 GitHub 仓库。Jellyfin-FFmpeg：v8.1.2-1。Danmu：v2.8.0。运行二进制未重新编译或修改，来自 build-installer.ps1 中指定并校验的官方运行包。
+Jellyfin-FFmpeg 的构建入口为源码内 msys2/build.sh；依赖版本、配置、补丁和构建规则位于 msys2/PKGBUILD。shaderc 子依赖版本来自该版本的 DEPS 文件；libplacebo 子模块来自 v7.360.1 的 git tree。LLVM 运行库来自 llvmorg-22.1.8。清单记录归档来源和 SHA256。
+
+部分 SourceForge 下载地址返回了网页，因此 libpng v1.6.58 和 FreeType VER-2-14-3 使用同版本官方 Git 仓库源码归档；LAME 使用与原 SHA256 完全一致的 Debian 镜像归档，Fontconfig 使用与原 SHA256 一致的官方 GitHub 归档。AMF 仅使用 public/include 的头文件，因此归档仅保留这些头文件及原 LICENSE.txt。
+zlib PR #1165 的远程 patch 文本校验值已发生变化，随包保留取得的补丁及其 SHA256。此补丁修改 contrib/minizip 的 ints.h 安装清单；源码来自同一上游提交 36ff1be48ef696cc67b0855f7c8537ce0276210d。重建时按清单更新该远程文件的校验值；Git 源码归档替代发行 tarball 时，也需调整 source 文件名、校验值和解压目录，并按原工程生成构建文件。
+
+NuGet 目录记录原始依赖包版本、原运行包 contentHash、官方 NuGet 许可元数据包的 SHA512、原 nuspec 和许可文本。这些包仅用于取得声明，没有用于替换运行 DLL。系统 .NET Framework 4.8 由 Windows 提供，不随包分发；Jellyfin 所需的 .NET 运行时随官方运行包内置，并附微软及相关第三方声明。
+
+构建 DanmuCinema：按源码 scripts/build.ps1 构建控制台、scripts/build-playback-plugin.ps1 构建桥接插件。构建安装器：Inno Setup 6.7.3 或更新版本，使用 scripts/build-installer.ps1；将随包源码归档恢复到 downloads/installer-sources。开发工具仅在构建机器上需要，最终用户无需安装。
+
+各第三方项目的许可证适用于对应组件；DanmuCinema 原创代码采用 MIT。允许按相应开源许可证修改和替换对应组件，安装器不限制调试、反向工程或修改源码。

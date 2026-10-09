@@ -1,8 +1,8 @@
-bin/
-runtime/
-downloads/
-data/
-tests/output/
+﻿packages/
+development/bin/
+development/downloads/
+development/tests/output/
+.publish-git/
 *.user
 *.lnk
 .vs/
@@ -16,5 +16,5 @@ tests/output/
 *.log
 *.bak
 *.partial
-config/dandanplay.json
-config/dandanplay.json.*
+**/dandanplay.json
+**/dandanplay.json.*
