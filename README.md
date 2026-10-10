@@ -93,7 +93,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File development/scripts/buil
 pwsh -NoProfile -File development/scripts/build-installer.ps1 -Version 1.0.8 -IsccPath "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" -PythonPath python
 ```
 
-编译输出位于 `development/bin/installer-app`。运行软件请使用安装包安装，仓库不维护个人运行环境；二进制运行组件、下载缓存和测试输出不提交到 Git。
+编译输出位于 `development/bin/installer-app`。
 
 ## 开源与反馈
 
