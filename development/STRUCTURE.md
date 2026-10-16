@@ -1,7 +1,5 @@
 # 工作区目录
 
-根目录保留 development/、packages/，以及仓库必需的 README、LICENSE、忽略规则和 Git 元数据。
-
 - development/：源码、图标、安装器、脚本、测试及第三方许可。bin/installer-app 是唯一程序构建输出；bin/runtime-references 只保存离线提取的编译引用；bin/reports 保存验证报告。downloads 保存离线组件和源码。
 - packages/：可分发的安装 EXE、对应源码 ZIP 和 SHA256。公开发布时同时提供安装包和对应源码包。
 
