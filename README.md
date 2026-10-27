@@ -1,3 +1,12 @@
+<!-- application-screenshots -->
+![服务总览](docs/screenshots/01-overview.png)
+
+![影片与弹幕](docs/screenshots/02-library.png)
+
+![整季弹幕匹配](docs/screenshots/03-season-matching.png)
+
+*截图均使用虚构的演示数据。*
+
 # DanmuCinema 弹幕影院
 
 Windows 局域网媒体服务与弹幕管理工具。电脑保存视频，播放客户端通过 Jellyfin 协议连接；程序负责媒体索引、弹幕匹配和下载。
