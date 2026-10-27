@@ -1,0 +1,90 @@
+{
+  "name": "danmucinema-liquid-glass",
+  "productName": "DanmuCinema",
+  "version": "2.0.4",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc --noEmit && vite build --configLoader runner",
+    "start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start.ps1",
+    "dev": "vite --host 127.0.0.1 --configLoader runner",
+    "test": "node --test tests/*.test.cjs",
+    "test:ui": "node scripts/check-ui.mjs",
+    "pack": "electron-builder --win --dir --x64 --publish never"
+  },
+  "dependencies": {
+    "liquid-glass-react": "1.1.1",
+    "lucide-react": "1.61.0",
+    "motion": "14.6.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "45.0.0",
+    "electron-builder": "26.18.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.5"
+  },
+  "build": {
+    "appId": "DanmuCinema.Desktop",
+    "productName": "DanmuCinema",
+    "electronDist": "tools/electron",
+    "asar": true,
+    "directories": {
+      "output": "development/bin/electron-package"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "public/icon.ico",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "development/bin/installer-app",
+        "to": "engine/bin"
+      },
+      {
+        "from": "development/assets",
+        "to": "engine/assets"
+      },
+      {
+        "from": "development/bin/playback-plugin",
+        "to": "engine/plugins/DanmuCinemaPlayback_1.1.0.0"
+      },
+      {
+        "from": "runtime",
+        "to": "engine/runtime"
+      },
+      {
+        "from": "plugins/Danmu_2.8.0.0",
+        "to": "engine/plugins/Danmu_2.8.0.0"
+      },
+      {
+        "from": "development/scripts/configure-firewall.ps1",
+        "to": "engine/scripts/configure-firewall.ps1"
+      }
+    ],
+    "win": {
+      "icon": "public/icon.ico",
+      "target": "dir",
+      "signAndEditExecutable": false
+    },
+    "npmRebuild": false,
+    "extraFiles": [
+      {
+        "from": "licenses",
+        "to": "licenses"
+      }
+    ]
+  },
+  "description": "Local media service and danmu management",
+  "author": "DanmuCinema"
+}
