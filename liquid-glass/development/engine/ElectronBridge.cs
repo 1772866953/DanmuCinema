@@ -19,6 +19,7 @@ namespace DanmuCinema.Desktop
         readonly SemaphoreSlim mutation = new SemaphoreSlim(1, 1);
         Dictionary<string, object>[] sources = new Dictionary<string, object>[0], episodes = new Dictionary<string, object>[0];
         Dictionary<string, object> episodeAnime;
+        Dictionary<string,object>[] searchContext = new Dictionary<string,object>[0];
         readonly Dictionary<string, MediaDeletePlan> deletions = new Dictionary<string, MediaDeletePlan>();
         public ElectronBridge(Application application, DesktopController controller, StreamWriter writer)
         { app = application; core = controller; output = writer; }
@@ -91,6 +92,20 @@ namespace DanmuCinema.Desktop
             catch{foreach(var property in typeof(AppSettings).GetProperties().Where(x=>x.CanRead&&x.CanWrite))property.SetValue(settings,property.GetValue(before,null),null);throw;}
         }
         LibraryEntry[] Selected() { return core.Library.Entries.Where(x => core.Library.Selection.Contains(x.Key)).ToArray(); }
+        Dictionary<string,object>[] SearchContext(Dictionary<string,object> p)
+        {
+            string focus=S(p,"focusKey");var keys=Json.Array(p,"keys").Select(Convert.ToString).ToArray();
+            if(focus!=""){
+                var item=core.Library.Entries.FirstOrDefault(x=>x.Key==focus);
+                if(item==null)throw new InvalidOperationException("当前影片已改变，请刷新列表后重新选择。");
+                return new[]{item.Item};
+            }
+            return (keys.Length>0?core.Library.Entries.Where(x=>keys.Contains(x.Key)).ToArray():Selected()).Select(x=>x.Item).ToArray();
+        }
+        object[] SourceRows()
+        {
+            return sources.Select((x,i)=>(object)new{index=i,name=Json.Text(x,"Name"),site=Json.Text(x,"Site"),year=Json.Text(x,"Year"),id=Json.Text(x,"Id"),category=Json.Text(x,"Category"),count=Json.Text(x,"EpisodeSize"),priority=I(x,"Priority"),reason=Json.Text(x,"MatchReason"),method=Json.Text(x,"MatchMethod"),suggestedEpisodeId=Json.Text(x,"SuggestedEpisodeId")}).ToArray();
+        }
         void Background(Task task) { Observe(task); }
         async void Observe(Task task) { try { await task; } catch (Exception error) { core.Status = error.Message; Log.Write(error.Message); core.Publish(); } }
         async Task Receive(string line)
@@ -125,7 +140,7 @@ namespace DanmuCinema.Desktop
                             size = x.Size.HasValue ? (double?)Math.Round(x.Size.Value / 1000000.0,2) : null, modified = x.ModifiedUtc.HasValue ? x.ModifiedUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "—",
                             type = MediaPresentation.Category(x), bitrate = x.Bitrate > 0 ? (x.Bitrate/1000000.0).ToString("0.0")+" Mbps" : "—",
                             danmu = x.IsFolder ? x.Members.Count(y => y.HasXml) + " / " + x.Members.Length + " 集已就绪" : x.DanmuLabel, count = x.IsFolder ? x.Members.Length : 1,
-                            searchTitle = MediaNames.SearchTitle(x.IsFolder ? x.Members[0].Item : x.Item), keys = x.SelectionKeys, selected = x.SelectionKeys.All(core.Library.Selection.Contains), mixed = x.SelectionKeys.Any(core.Library.Selection.Contains) && !x.SelectionKeys.All(core.Library.Selection.Contains) }).ToArray();
+                            searchTitle = x.IsFolder?MediaNames.SearchTitle(x.Members[0].Item):MediaNames.SingleSearchTitle(x.Item), keys = x.SelectionKeys, selected = x.SelectionKeys.All(core.Library.Selection.Contains), mixed = x.SelectionKeys.Any(core.Library.Selection.Contains) && !x.SelectionKeys.All(core.Library.Selection.Contains) }).ToArray();
                 case "select":
                     foreach (string key in Json.Array(p,"keys").Select(Convert.ToString)) { if (core.Library.Entries.Any(x => x.Key == key)) core.Library.Selection.Set(key,B(p,"selected")); }
                     core.Publish(); return true;
@@ -148,24 +163,34 @@ namespace DanmuCinema.Desktop
                 case "sourceChoices": return core.Gateway.Catalog.SourceChoices();
                 case "search":
                     SearchHistory.Add("danmu",S(p,"keyword"));
-                    var searchSeed = Selected().FirstOrDefault(); int season = I(p,"season");
-                    if(season==0) season=searchSeed==null?SmartMatching.SeasonTitle(S(p,"keyword")):SmartMatching.Season(searchSeed.Item);
-                    var found = await core.Gateway.Catalog.Search(S(p,"keyword").Trim(), B(p,"animeOnly"), B(p,"smart"), season, S(p,"provider") == "" ? null : S(p,"provider"), CancellationToken.None, Selected().Length > 1 || searchSeed != null && SmartMatching.IsEpisodic(searchSeed.Item));
+                    searchContext=SearchContext(p);int season=I(p,"season");
+                    var found = await core.Gateway.Catalog.ManualSearch(S(p,"keyword").Trim(),searchContext,B(p,"animeOnly"),B(p,"smart"),season,S(p,"provider")==""?null:S(p,"provider"),CancellationToken.None);
                     sources = found.Items.OfType<Dictionary<string, object>>().ToArray();
                     episodes = new Dictionary<string,object>[0]; episodeAnime = null;
-                    return sources.Select((x,i) => new { index=i, name=Json.Text(x,"Name"), site=Json.Text(x,"Site"), year=Json.Text(x,"Year"), id=Json.Text(x,"Id"), category=Json.Text(x,"Category"), count=Json.Text(x,"EpisodeSize") }).ToArray();
+                    if(B(p,"details"))return new{sources=SourceRows(),status=found.Summary};
+                    return SourceRows();
                 case "identify":
                     var local = Selected().FirstOrDefault(); if (local == null) throw new InvalidOperationException("请先选择本地影片。");
-                    var match = await core.Gateway.Catalog.IdentifyFile(local.Item,CancellationToken.None);
-                    sources = match.Animes; episodes = new Dictionary<string,object>[0]; episodeAnime = null;
-                    return new { status = match.Status, sources = sources.Select((x,i) => new { index=i,name=Json.Text(x,"Name"),site=Json.Text(x,"Site"),id=Json.Text(x,"Id"),category=Json.Text(x,"Category"),count=Json.Text(x,"EpisodeSize") }).ToArray() };
+                    searchContext=Selected().Select(x=>x.Item).ToArray();
+                    var match = await core.Gateway.Catalog.ManualSearch(MediaNames.SearchTitle(local.Item),searchContext,false,true,0,"dandan",CancellationToken.None,true);
+                    sources = match.Items.OfType<Dictionary<string,object>>().ToArray(); episodes = new Dictionary<string,object>[0]; episodeAnime = null;
+                    return new { status = match.Summary, sources = SourceRows() };
                 case "episodes":
                     int sourceIndex = I(p,"index",-1);
                     var requestedAnime = S(p,"id") != "" ? core.Gateway.Catalog.KnownAnime(S(p,"id")) : sourceIndex >= 0 && sourceIndex < sources.Length ? sources[sourceIndex] : null;
                     if(requestedAnime == null) throw new InvalidOperationException("请重新搜索并选择作品。");
                     episodes = new Dictionary<string,object>[0]; episodeAnime = null;
                     episodes = (await core.Gateway.Catalog.Episodes(requestedAnime)).OfType<Dictionary<string, object>>().ToArray(); episodeAnime = requestedAnime;
-                    return episodes.Select((x,i) => new { index=i, id=Json.Text(x,"Id"), number=Json.Text(x,"Number"), title=Json.Text(x,"Title") }).ToArray();
+                    string suggestion="";
+                    if(searchContext.Length==1){
+                        var ranked=sources.FirstOrDefault(x=>Json.Text(x,"Id")==Json.Text(requestedAnime,"Id"));
+                        suggestion=Json.Text(ranked,"SuggestedEpisodeId");
+                        if(suggestion=="" || !episodes.Any(x=>Json.Text(x,"Id")==suggestion)){
+                            int wanted=BatchMatching.RemoteNumber(searchContext[0],episodes);var possible=episodes.Where(x=>wanted>0&&SmartMatching.RemoteNumber(x)==wanted).ToArray();
+                            suggestion=possible.Length==1?Json.Text(possible[0],"Id"):"";
+                        }
+                    }
+                    return episodes.Select((x,i) => new { index=i, id=Json.Text(x,"Id"), number=Json.Text(x,"Number"), title=Json.Text(x,"Title"),recommended=suggestion!=""&&Json.Text(x,"Id")==suggestion }).ToArray();
                 case "plan":
                     var chosen = Selected(); if(chosen.Length == 0) throw new InvalidOperationException("请选择本地影片或文件夹。");
                     if (S(p,"scope") == "season") { var seed=chosen[0].Item; chosen=core.Library.Entries.Where(x=>SmartMatching.SameSeason(seed,x.Item)).ToArray(); }
@@ -188,7 +213,9 @@ namespace DanmuCinema.Desktop
                         if(episodeAnime==null)throw new InvalidOperationException("请重新搜索并选择作品。");
                         episodes=(await core.Gateway.Catalog.Episodes(episodeAnime)).OfType<Dictionary<string,object>>().ToArray();
                     }
-                    int ep=I(p,"episode",-1); var item=Selected().FirstOrDefault(); if(item==null || ep<0 || ep>=episodes.Length) throw new InvalidOperationException("请选择本地影片和在线集数。");
+                    int ep=I(p,"episode",-1);var singleTargets=SearchContext(p);
+                    if(singleTargets.Length!=1)throw new InvalidOperationException("单集下载请选择一个本地影片，或切换至整季预览。");
+                    var item=core.Library.Entries.FirstOrDefault(x=>Json.Text(x.Item,"Path")==Json.Text(singleTargets[0],"Path")); if(item==null || ep<0 || ep>=episodes.Length) throw new InvalidOperationException("请选择本地影片和在线集数。");
                     if(S(p,"episodeId") != "") {ep=Array.FindIndex(episodes,x=>Json.Text(x,"Id")==S(p,"episodeId"));if(ep<0)throw new InvalidOperationException("在线集数已更改，请重新选择。");}
                     Background(core.DownloadSingle(item.Item,episodes[ep])); return true;
                 case "refreshDanmu": await core.RefreshDanmu(); return true;

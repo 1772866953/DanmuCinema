@@ -32,7 +32,7 @@ namespace DanmuCinema
         async Task<string[]> SearchAliases(string keyword, CancellationToken cancellation)
         {
             string clean = SmartMatching.CleanTitle(keyword), normalized = AliasKey(clean);
-            if (!Regex.IsMatch(clean, "[a-zA-Z]{3}") || Regex.IsMatch(clean, "[\u4e00-\u9fff]")) return new string[0];
+            if (!Regex.IsMatch(clean, "[a-zA-Z]{3}|[\u4e00-\u9fff]{2}")) return new string[0];
             string resolutionKey = DandanApiCache.Key("resolved-title-v1|" + normalized);
             var known = KnownSearchAliases(keyword); if(known.Length > 0) return known;
             try

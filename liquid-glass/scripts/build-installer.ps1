@@ -1,4 +1,4 @@
-param([string]$Version = '2.0.4', [switch]$SkipBuild, [switch]$TestBuild, [switch]$PrepareOnly)
+param([string]$Version = '2.0.8', [switch]$SkipBuild, [switch]$TestBuild, [switch]$PrepareOnly)
 $ErrorActionPreference = 'Stop'
 $taskProject = Split-Path -Parent $PSScriptRoot
 $taskWorkspace = Split-Path -Parent $taskProject

@@ -1,7 +1,7 @@
 {
   "name": "danmucinema-liquid-glass",
   "productName": "DanmuCinema",
-  "version": "2.0.4",
+  "version": "2.0.8",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",

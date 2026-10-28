@@ -2,7 +2,7 @@
   #define PackageRoot "..\bin\installer-payload"
 #endif
 #ifndef PackageVersion
-  #define PackageVersion "2.0.4"
+  #define PackageVersion "2.0.8"
 #endif
 #ifndef OutputFolder
   #define OutputFolder "..\..\packages"

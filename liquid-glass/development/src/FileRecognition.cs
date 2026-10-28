@@ -34,7 +34,7 @@ namespace DanmuCinema
             long length = file.Length, ticks = file.LastWriteTimeUtc.Ticks;
             string key = DandanApiCache.Key("hash16m|" + file.FullName.ToUpperInvariant() + "|" + length + "|" + ticks);
             string cached = Cache.Read(key);
-            if (cached != null) { try { var feature = Json.Read<VideoFeature>(cached); if (feature != null && Regex.IsMatch(feature.Hash ?? "", "^[a-fA-F0-9]{32}$") && feature.Length == length && feature.WriteTicks == ticks) return feature; } catch { } }
+            if (cached != null) { try { var feature = Json.Read<VideoFeature>(cached); if (feature != null && Regex.IsMatch(feature.Hash ?? "", "^[a-fA-F0-9]{32}$") && feature.Length == length && feature.WriteTicks == ticks) { feature.FileName = file.Name; return feature; } } catch { } }
             // Only sample the first 16 MiB. Never scan tens of GB for identification.
             var result = await Task.Run(() =>
             {
@@ -45,25 +45,27 @@ namespace DanmuCinema
                     while (remaining > 0) { cancellation.ThrowIfCancellationRequested(); int count = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining)); if (count == 0) throw new IOException("文件在识别时发生变化。"); md5.TransformBlock(buffer, 0, count, null, 0); remaining -= count; }
                     md5.TransformFinalBlock(new byte[0], 0, 0); file.Refresh();
                     if (!file.Exists || file.Length != length || file.LastWriteTimeUtc.Ticks != ticks) throw new IOException("文件在识别时发生变化，请重试。");
-                    return new VideoFeature { Hash = BitConverter.ToString(md5.Hash).Replace("-", "").ToLowerInvariant(), Length = length, WriteTicks = ticks, FileName = Path.GetFileNameWithoutExtension(file.Name) };
+                    return new VideoFeature { Hash = BitConverter.ToString(md5.Hash).Replace("-", "").ToLowerInvariant(), Length = length, WriteTicks = ticks, FileName = file.Name };
                 }
             }, cancellation).ConfigureAwait(false);
             cancellation.ThrowIfCancellationRequested(); Cache.Write(key, "hash", Path.GetFileName(video), Json.Write(result), SmartMatching.CleanTitle(Path.GetFileNameWithoutExtension(video))); return result;
         }
-        public async Task<FileRecognition> IdentifyFile(Dictionary<string, object> item, CancellationToken cancellation)
+        public async Task<FileRecognition> IdentifyFile(Dictionary<string, object> item, CancellationToken cancellation, string mode = "all")
         {
+            if (mode != "all" && mode != "hashOnly" && mode != "fileNameOnly") throw new ArgumentException("识别模式无效。");
             var provider = Providers().FirstOrDefault(x => x.Id == "dandan");
             if (provider == null || !DandanConfig.Load().Ready) return new FileRecognition { Status = "官方源未启用或配置未就绪。" };
             var feature = await Feature(Json.Text(item, "Path"), cancellation).ConfigureAwait(false);
             long runtime; Int64.TryParse(Json.Text(item, "RunTimeTicks"), out runtime);
             int duration = (int)Math.Min(Int32.MaxValue, Math.Max(0, runtime / TimeSpan.TicksPerSecond));
-            Dictionary<string, object> hashResponse; bool hashUnavailable = false;
-            try { hashResponse = Json.Object(await Fetch(provider, "/api/v2/match", new { fileName = feature.FileName, fileHash = feature.Hash, fileSize = feature.Length, videoDuration = duration, matchMode = "hashOnly" }, cancellation).ConfigureAwait(false)); }
+            Dictionary<string, object> hashResponse = new Dictionary<string, object>(); bool hashUnavailable = false;
+            try { if (mode != "fileNameOnly") hashResponse = Json.Object(await Fetch(provider, "/api/v2/match", new { fileName = feature.FileName, fileHash = feature.Hash, fileSize = feature.Length, videoDuration = duration, matchMode = "hashOnly" }, cancellation).ConfigureAwait(false)); }
             catch (Exception) { cancellation.ThrowIfCancellationRequested(); hashUnavailable = true; Log.Write("官方 hash 识别暂不可用，继续核对文件名及同季度来源。"); hashResponse = new Dictionary<string, object>(); }
             var hashRows = Json.Array(hashResponse, "Matches").OfType<Dictionary<string, object>>().ToArray();
             if (hashRows.Length == 1) Cache.SetAnime(DandanApiCache.Key("hash16m|" + Path.GetFullPath(Json.Text(item, "Path")).ToUpperInvariant() + "|" + feature.Length + "|" + feature.WriteTicks), Json.Text(hashRows[0], "AnimeTitle"));
             if (Json.Text(hashResponse, "IsMatched") == "True" && hashRows.Length == 1)
                 return Recognized(provider, hashRows, item, true);
+            if (mode == "hashOnly") return new FileRecognition { Method="hash", TemporaryFailure=hashUnavailable, Status=hashUnavailable?"哈希识别请求未完成。":"哈希未收录，将继续核对文件名与作品。" };
             var named = Json.Object(await Fetch(provider, "/api/v2/match", new { fileName = feature.FileName, fileHash = feature.Hash, fileSize = feature.Length, videoDuration = duration, matchMode = "fileNameOnly" }, cancellation).ConfigureAwait(false));
             var namedRows = Json.Array(named, "Matches").OfType<Dictionary<string, object>>().ToArray();
             if (namedRows.Length == 1) Cache.SetAnime(DandanApiCache.Key("hash16m|" + Path.GetFullPath(Json.Text(item, "Path")).ToUpperInvariant() + "|" + feature.Length + "|" + feature.WriteTicks), Json.Text(namedRows[0], "AnimeTitle"));

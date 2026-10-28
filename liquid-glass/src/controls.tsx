@@ -14,12 +14,14 @@ export function SelectControl({ id, label, value, options, onChange, disabled = 
   const generated = useId(), listId = `${generated}-options`
   const button = useRef<HTMLButtonElement>(null), popup = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false), [active, setActive] = useState(0)
+  const [scrollTarget, setScrollTarget] = useState({ index: 0 })
   const [placement, setPlacement] = useState<Placement | null>(null)
   const prefix = useRef({ text: '', time: 0 })
   const selected = Math.max(0, options.findIndex((option) => option.value === String(value)))
   const close = (restore = false) => { setOpen(false); if (restore) button.current?.focus({ preventScroll: true }) }
   const choose = (index: number) => { onChange(options[index].value); close(true) }
-  const reveal = () => { if (!disabled) { setActive(selected); setOpen(true) } }
+  const activate = (index: number) => { setActive(index); setScrollTarget({ index }) }
+  const reveal = () => { if (!disabled) { activate(selected); setOpen(true) } }
   useLayoutEffect(() => {
     if (!open) return
     const update = () => {
@@ -33,11 +35,11 @@ export function SelectControl({ id, label, value, options, onChange, disabled = 
       setPlacement({ left: Math.min(innerWidth - width - 12, Math.max(12, rect.left)), top: up ? rect.top - maxHeight - 6 : rect.bottom + 6, width, maxHeight, above: up })
     }
     const pointer = (event: PointerEvent) => { if (!button.current?.contains(event.target as Node) && !popup.current?.contains(event.target as Node)) close() }
-    update(); window.addEventListener('resize', update); document.addEventListener('scroll', update, true); document.addEventListener('pointerdown', pointer)
-    return () => { window.removeEventListener('resize', update); document.removeEventListener('scroll', update, true); document.removeEventListener('pointerdown', pointer) }
+    const scroll = (event: Event) => { if (!popup.current?.contains(event.target as Node)) update() }
+    update(); window.addEventListener('resize', update); document.addEventListener('scroll', scroll, true); document.addEventListener('pointerdown', pointer)
+    return () => { window.removeEventListener('resize', update); document.removeEventListener('scroll', scroll, true); document.removeEventListener('pointerdown', pointer) }
   }, [open, options.length])
   useEffect(() => { if (disabled) setOpen(false) }, [disabled])
-  useEffect(() => { popup.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({ block: 'nearest' }) }, [active, open])
   return <div className={`select-control ${className}`}>
     <GlassButton nativeLayout optics="clear" type="button" className="select-trigger" id={id || generated} ref={button} role="combobox" aria-label={label}
       aria-expanded={open} aria-controls={open ? listId : undefined} aria-haspopup="listbox" disabled={disabled}
@@ -49,23 +51,33 @@ export function SelectControl({ id, label, value, options, onChange, disabled = 
           event.preventDefault(); event.stopPropagation()
           if (!open) { reveal(); return }
           if (event.key === 'Enter' || event.key === ' ') { choose(active); return }
-          setActive(event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : (active + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length)
+          activate(event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : (active + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length)
         } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey) {
           const now = Date.now(); prefix.current.text = now - prefix.current.time < 700 ? prefix.current.text + event.key : event.key; prefix.current.time = now
           const index = options.findIndex((option) => option.label.toLocaleLowerCase().startsWith(prefix.current.text.toLocaleLowerCase()))
-          if (index >= 0) { if (!open) reveal(); setActive(index) }
+          if (index >= 0) { if (!open) reveal(); activate(index) }
         }
       }}><span className="select-option-label">{options[selected]?.color && <i className="select-color-dot" style={{ background: options[selected].color }} />}{options[selected]?.label}</span><ChevronDown size={15} /></GlassButton>
     {createPortal(<AnimatePresence>{open && placement && <SelectPopup key={listId} popup={popup} id={listId} label={label} placement={placement}
-      options={options} selected={selected} active={active} onActive={setActive} onChoose={choose} />}</AnimatePresence>, document.body)}
+      options={options} selected={selected} active={active} scrollTarget={scrollTarget} onActive={setActive} onChoose={choose} />}</AnimatePresence>, document.body)}
   </div>
 }
 
-function SelectPopup({ popup, id, label, placement, options, selected, active, onActive, onChoose }: {
+function SelectPopup({ popup, id, label, placement, options, selected, active, scrollTarget, onActive, onChoose }: {
   popup: React.RefObject<HTMLDivElement | null>; id: string; label: string; placement: Placement; options: readonly Option[];
-  selected: number; active: number; onActive(index: number): void; onChoose(index: number): void
+  selected: number; active: number; scrollTarget: { index: number }; onActive(index: number): void; onChoose(index: number): void
 }) {
   const present = useIsPresent(), { reduced } = useContext(AppearanceContext)
+  useLayoutEffect(() => {
+    const list = popup.current?.querySelector<HTMLElement>('[role="listbox"]')
+    const option = list?.querySelector<HTMLElement>(`[data-index="${scrollTarget.index}"]`)
+    if (!list || !option) return
+    // Only opening and keyboard navigation scroll the list. Pointer hover must
+    // not move a partially visible row or scroll any of the popup's ancestors.
+    const top = option.offsetTop - list.offsetTop, bottom = top + option.offsetHeight
+    if (top < list.scrollTop) list.scrollTop = top
+    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight
+  }, [popup, scrollTarget])
   return <div ref={popup} className="select-popup" style={{ left: placement.left, top: placement.top, width: placement.width }}
     inert={!present || undefined} aria-hidden={!present || undefined}>
     <GlassSurface kind="popover" radius={18} className="select-menu" initial={{ opacity: 0, y: reduced ? 0 : placement.above ? 4 : -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? .07 : .18 }}><div role="listbox" id={id} aria-label={label} style={{ maxHeight: Math.max(44, placement.maxHeight - 22) }}>

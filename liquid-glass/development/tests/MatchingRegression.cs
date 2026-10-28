@@ -43,6 +43,7 @@ class MatchingRegression
                 if(sent.Contains("Seija Musou")) body=sent.Contains("hashOnly")?"{\"success\":true,\"isMatched\":false,\"matches\":[]}":Json.Write(new{success=true,isMatched=false,matches=new[]{
                     new{animeId=5922,episodeId=59220001,animeTitle="恋姬无双",episodeTitle="第1话 其他作品",typeDescription="TV动画"},
                     new{animeId=17662,episodeId=176620001,animeTitle="圣者无双～上班族的异世界生存之道～",episodeTitle="第1话 治愈士公会",typeDescription="TV动画"}}});
+                else if(sent.Contains("爱情公寓")) body="{\"success\":true,\"isMatched\":false,\"matches\":[]}";
                 else {
                     Check(sent.Contains("hashOnly"),"hash 命中时优先 hashOnly 且不触发文件名回退");
                     Check(Json.Text(Json.Object(sent),"fileHash")=="900150983cd24fb0d6963f7d28e17f72","文件 hash 使用真实内容 MD5");

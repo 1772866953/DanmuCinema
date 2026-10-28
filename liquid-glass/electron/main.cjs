@@ -2,11 +2,13 @@
 const {app,BrowserWindow,ipcMain,Tray,Menu,dialog,shell,clipboard,nativeTheme}=require('electron')
 const path=require('node:path'),fs=require('node:fs'),{pathToFileURL}=require('node:url')
 const {CoreBridge}=require('./bridge.cjs')
+const {createLoginItems}=require('./login-items.cjs')
 const base=path.resolve(__dirname,'..'),qa=process.argv.includes('--qa')
 if(process.env.DANMU_ELECTRON_USER_DATA)app.setPath('userData',path.resolve(process.env.DANMU_ELECTRON_USER_DATA))
 else if(app.isPackaged)app.setPath('userData',path.join(path.dirname(process.execPath),'data','electron'))
-let win=null,tray=null,core=null,lastState=null,quitting=false,shutdown=null,geometry={},uiSession=null
+let win=null,tray=null,core=null,lastState=null,quitting=false,shutdown=null,geometry={},uiSession=null,closingWindow=null,restoreRequested=false
 const loginArgs=app.isPackaged?['--tray','--start']:[base,'--tray','--start']
+const loginItems=createLoginItems(app,{path:process.execPath,args:loginArgs})
 const dataRoot=()=>app.isPackaged?path.dirname(process.execPath):path.join(base,'runtime-data')
 const stateFile=()=>path.join(app.getPath('userData'),'window.json')
 function persist(){try{fs.mkdirSync(app.getPath('userData'),{recursive:true});fs.writeFileSync(stateFile(),JSON.stringify(geometry))}catch{}}
@@ -15,17 +17,28 @@ const fixture=qa?require('../tests/fixture.cjs')():null
 const allowed=new Set(['cover','state','start','stop','scan','refresh','library','select','selectClear','prepare','pause','resume','cancel','retry','search','identify','episodes','plan','planSelect','downloadBatch','downloadSingle','refreshDanmu','history','historyAdd','historyRemove','historyClear','cache','cacheRemove','cacheClear','cacheRetention','logs','logsClear','logRetention','sources','preferences','initialize','addLibrary','libraries','removeLibrary','libraryType','connection','schedule','scheduleCancel','deletePlan','deleteConfirm','firewall'])
 function trusted(event){if(!win||event.sender!==win.webContents||event.senderFrame!==win.webContents.mainFrame)throw new Error('不允许的调用来源')}
 function remember(){if(!win||win.isDestroyed()||win.isMinimized())return;geometry={...win.getNormalBounds(),maximized:win.isMaximized()};persist()}
-function show(){if(quitting)return;if(win&&!win.isDestroyed()){if(win.isMinimized())win.restore();win.show();win.focus();return}
+function show(){if(quitting)return;if(win&&!win.isDestroyed()){if(closingWindow===win){restoreRequested=true;return}if(win.isMinimized())win.restore();win.show();win.focus();return}
+  restoreRequested=false
   const initialGeometry={...geometry}
   win=new BrowserWindow({width:geometry.width||1320,height:geometry.height||880,minWidth:940,minHeight:640,...(Number.isFinite(geometry.x)?{x:geometry.x,y:geometry.y}:{}),show:false,frame:false,backgroundColor:'#e6edf1',icon:path.join(base,'public/icon.ico'),roundedCorners:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true,backgroundThrottling:true}})
-  win.setMenu(null);win.loadFile(path.join(base,'dist/index.html'),qa?{hash:'qa'}:{})
-  win.once('ready-to-show',()=>{if(initialGeometry.width&&initialGeometry.height)fitNativeBounds(win,initialGeometry);if(initialGeometry.maximized)win.maximize();if(!qa)win.show()})
-  win.on('resize',()=>{remember();win?.webContents.send('window:state',{maximized:win.isMaximized()})});win.on('move',remember)
-  win.webContents.setWindowOpenHandler(()=>({action:'deny'}));win.webContents.on('will-navigate',(event,url)=>{if(url!==pathToFileURL(path.join(base,'dist/index.html')).href)event.preventDefault()})
-  win.on('close',event=>{remember();if(quitting||qa)return;if(lastState?.settings?.CloseToTray!==false){win.webContents.send('window:state',{releasing:true});return}event.preventDefault();quit()})
-  const visibility=visible=>{if(core&&!quitting)core.ready.then(()=>{if(!quitting&&core.child.exitCode===null)return core.call('visibility',{visible})}).catch(()=>{})}
-  win.on('show',()=>visibility(true));win.on('hide',()=>visibility(false));win.on('minimize',()=>visibility(false));win.on('restore',()=>visibility(true))
-  win.on('closed',()=>{visibility(false);win=null})
+  const created=win
+  created.setMenu(null);created.loadFile(path.join(base,'dist/index.html'),qa?{hash:'qa'}:{})
+  created.once('ready-to-show',()=>{if(win!==created||created.isDestroyed())return;if(initialGeometry.width&&initialGeometry.height)fitNativeBounds(created,initialGeometry);if(initialGeometry.maximized)created.maximize();if(!qa)created.show()})
+  created.on('resize',()=>{if(win!==created)return;remember();created.webContents.send('window:state',{maximized:created.isMaximized()})});created.on('move',()=>{if(win===created)remember()})
+  created.webContents.setWindowOpenHandler(()=>({action:'deny'}));created.webContents.on('will-navigate',(event,url)=>{if(url!==pathToFileURL(path.join(base,'dist/index.html')).href)event.preventDefault()})
+  created.on('close',event=>{if(win!==created)return;remember();if(quitting||qa){closingWindow=created;return}if(lastState?.settings?.CloseToTray!==false){closingWindow=created;created.webContents.send('window:state',{releasing:true});return}event.preventDefault();quit()})
+  const visibility=visible=>{
+    if(visible?win!==created:win&&win!==created)return
+    if(core&&!quitting)core.ready.then(()=>{
+      if(quitting||core.child.exitCode!==null)return
+      if(visible?win!==created||created.isDestroyed():win&&win!==created)return
+      return core.call('visibility',{visible})
+    }).catch(()=>{})
+  }
+  created.on('show',()=>visibility(true));created.on('hide',()=>visibility(false));created.on('minimize',()=>visibility(false));created.on('restore',()=>visibility(true))
+  // A quickly restored window may exist before the old window finishes closing.
+  // Only the owner may clear the foreground reference or publish its visibility.
+  created.on('closed',()=>{if(closingWindow===created)closingWindow=null;if(win===created){visibility(false);win=null}if(restoreRequested&&!quitting)show()})
 }
 const trace=phase=>{if(process.env.DANMU_LIFECYCLE_TRACE)fs.appendFileSync(process.env.DANMU_LIFECYCLE_TRACE,Date.now()+' '+phase+'\n')}
 async function quit(confirmed=false){if(shutdown)return shutdown;if(!confirmed&&!qa&&(lastState?.schedule?.active||lastState?.batchRunning||lastState?.preparing||lastState?.loading)){show();const send=()=>win?.webContents.send('window:state',{requestExit:true});if(win.webContents.isLoading())win.webContents.once('did-finish-load',send);else send();return}quitting=true;trace('quit-request');shutdown=(async()=>{try{trace('core-stop');await core?.close();trace('core-stopped')}catch(error){trace('core-error:'+error.message)}tray?.destroy();win?.destroy();trace('app-quit');app.quit()})();return shutdown}
@@ -52,8 +65,8 @@ app.whenReady().then(async()=>{
     if(action==='openLogs')return shell.openPath(path.join(dataRoot(),'data'))
     if(action==='openWeb')return shell.openExternal(`http://127.0.0.1:${lastState?.settings?.Port||8096}/web/`)
     if(action==='feedback')return shell.openExternal('mailto:lizimu.hai@outlook.com')
-    if(action==='autoStartGet')return app.getLoginItemSettings({path:process.execPath,args:loginArgs}).openAtLogin
-    if(action==='autoStart'){app.setLoginItemSettings({openAtLogin:!!value,path:process.execPath,args:loginArgs,name:'DanmuCinema'});return app.getLoginItemSettings({path:process.execPath,args:loginArgs}).openAtLogin}
+    if(action==='autoStartGet')return loginItems.get()
+    if(action==='autoStart')return loginItems.set(value)
     if(action==='quitConfirmed'){setImmediate(()=>quit(true));return true}
     if(action==='sessionGet')return uiSession
     if(action==='sessionSet'){uiSession={...uiSession,...value};return true}

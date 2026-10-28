@@ -12,6 +12,10 @@ namespace DanmuCinema
         static int Number(string value) { int number; return Int32.TryParse(value, out number) && number > 0 ? number : 0; }
         public static int Season(Dictionary<string, object> item)
         {
+            string path = Json.Text(item, "Path");
+            foreach (string label in new[] { Path.GetFileNameWithoutExtension(path) ?? "", Path.GetFileName(MediaNames.WorkFolder(path)) ?? "" })
+                if (Regex.IsMatch(label, @"(?<![a-z])S\d{1,2}(?!\d)|\bSeason\s*\d+|第\s*[一二三四五六七八九十\d]+\s*[季期]", RegexOptions.IgnoreCase))
+                { int explicitSeason = SeasonTitle(label); if (explicitSeason > 0) return explicitSeason; }
             int number = Number(Json.Text(item, "ParentIndexNumber"));
             if (number > 0) return number;
             foreach (string value in new[] { Json.Text(item, "SeriesName"), Json.Text(item, "Name"), Path.GetFileNameWithoutExtension(Json.Text(item, "Path")) ?? "", Path.GetDirectoryName(Json.Text(item, "Path")) ?? "" })
@@ -62,6 +66,7 @@ namespace DanmuCinema
             text = Regex.Replace(text, @"\b(?:\d{3,4}p|BDRip|WEB[- ]?DL|BluRay|HEVC|AVC|x26[45]|H\.?26[45]|MKV|MP4)\b", " ", RegexOptions.IgnoreCase);
             text = Regex.Replace(text, @"\b(?:8|10|12)[- ]?bit\b|\b(?:FLAC|AAC|DTS(?:-HD)?|TRUEHD|EAC3|AC3)\b", " ", RegexOptions.IgnoreCase);
             text = Regex.Replace(text, @"\b\d{3,4}[x×]\d{3,4}\b", " ", RegexOptions.IgnoreCase);
+            text = Regex.Replace(text, @"(?:[·._-]\s*)?第\s*\d{1,3}\s*[集话話]\s*$", " ", RegexOptions.IgnoreCase);
             text = Regex.Replace(text, @"(?:S\d{1,2}E\d{1,3}|\bSeason\s*\d+|(?<![a-z])S\d{1,2}(?!\d)|第\s*[一二三四五六七八九十\d]+\s*[季期]|\b\d+(?:st|nd|rd|th)\s+season\b)", " ", RegexOptions.IgnoreCase);
             text = Regex.Replace(text, @"(?:\s+(?:II|III|IV)|\s*\(\d{1,3}\)|\s+-\s+\d{1,3}|\s+\d{1,3})\s*$", "", RegexOptions.IgnoreCase);
             return Regex.Replace(text, @"\s+", " ").Trim(' ', '-', '_', '.');
@@ -161,6 +166,16 @@ namespace DanmuCinema
     }
     public static class BatchMatching
     {
+        public static int RemoteNumber(Dictionary<string,object> video,IEnumerable<Dictionary<string,object>> episodes)
+        {
+            int number=SmartMatching.Episode(video);var numbers=episodes.Select(SmartMatching.RemoteNumber).Where(n=>n>0).Distinct().OrderBy(n=>n).ToArray();
+            if(numbers.Contains(number))return number;
+            int[] range=MediaNames.ReleaseRange(video);if(range.Length!=2)return number;
+            int count=range[1]-range[0]+1;
+            if(number>=range[0]&&number<=range[1]&&numbers.SequenceEqual(Enumerable.Range(1,count)))return number-range[0]+1;
+            if(number>=1&&number<=count&&numbers.SequenceEqual(Enumerable.Range(range[0],count)))return range[0]+number-1;
+            return number;
+        }
         public static List<BatchEntry> Plan(IEnumerable<Dictionary<string, object>> local, IEnumerable<Dictionary<string, object>> remote)
         {
             var videos = local.GroupBy(x => Json.Text(x, "Path"), StringComparer.OrdinalIgnoreCase).Select(x => x.First()).ToArray();
@@ -168,10 +183,10 @@ namespace DanmuCinema
             var plan = new List<BatchEntry>();
             foreach (var video in videos)
             {
-                int number = SmartMatching.Episode(video);
+                int original=SmartMatching.Episode(video),number = RemoteNumber(video,episodes);
                 var matches = episodes.Where(x => number > 0 && SmartMatching.RemoteNumber(x) == number).ToArray();
-                string error = number == 0 ? "集号未识别" : videos.Count(x => SmartMatching.Episode(x) == number) > 1 ? "本地集号重复，请选择单集下载" : matches.Length > 1 ? "在线集号重复" : matches.Length == 0 ? "没有对应在线集数" : !File.Exists(Json.Text(video, "Path")) ? "本地文件不存在" : "待下载";
-                plan.Add(new BatchEntry { Local = video, Remote = matches.Length == 1 ? matches[0] : null, Number = number, Selected = error == "待下载", Status = error });
+                string error = number == 0 ? "集号未识别" : videos.Count(x => RemoteNumber(x,episodes) == number) > 1 ? "本地集号重复，请选择单集下载" : matches.Length > 1 ? "在线集号重复" : matches.Length == 0 ? "没有对应在线集数" : !File.Exists(Json.Text(video, "Path")) ? "本地文件不存在" : "待下载";
+                plan.Add(new BatchEntry { Local = video, Remote = matches.Length == 1 ? matches[0] : null, Number = number, Selected = error == "待下载", Status = error=="待下载"&&original!=number?"待下载 · 编号 "+original+" → "+number:error });
             }
             return plan.OrderBy(x => x.Number == 0 ? Int32.MaxValue : x.Number).ToList();
         }
