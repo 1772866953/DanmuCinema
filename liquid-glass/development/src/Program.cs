@@ -7,6 +7,14 @@ namespace DanmuCinema {
                 return BitConverter.ToString(sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(value.ToUpperInvariant()))).Replace("-", "").Substring(0,20);
         }
         [STAThread] static int Main(string[] args) {
+            if(args.Length==3 && args[0]=="--execute-schedule") {
+                try {
+                    Paths.Root=System.IO.Path.GetFullPath(args[1]);
+                    var schedule=new PersistentSchedule(Paths.Root);
+                    schedule.RunDue(args[2], action=>{if(action==PowerAction.StopServices)PersistentSchedule.StopServices(Paths.Root);else PowerActions.Execute(action);});
+                    return 0;
+                } catch(Exception e) { try { Log.Write("系统定时任务："+e.Message); } catch {} return 1; }
+            }
             if(args.Length>0 && args[0].StartsWith("--installer-",StringComparison.Ordinal)) {
                 Paths.Root=System.IO.Path.GetFullPath(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"..","..",".."));
                 Paths.RuntimeOverride=System.IO.Path.Combine(Paths.Root,"resources","engine","runtime","jellyfin");

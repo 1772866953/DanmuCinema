@@ -25,12 +25,24 @@ namespace DanmuCinema
             title=Regex.Replace(title??"",@"(?:^|[\s._-])EP?\s*\d{1,3}(?!\d)|第\s*\d{1,3}\s*[集话話]"," ",RegexOptions.IgnoreCase);
             return SmartMatching.CleanTitle(title);
         }
-        static string ClassificationIdentity(Dictionary<string, object> item, string mediaRoot)
+        static string LegacyClassificationIdentity(Dictionary<string, object> item, string mediaRoot)
         {
             string title=ClassificationTitle(item,mediaRoot), folder=MediaNames.WorkFolder(Json.Text(item,"Path"));
             // Standalone movies sharing a directory must never share a classification.
             string location=SmartMatching.IsStandaloneMovie(item)?Json.Text(item,"Path"):folder;
             return (location??"").ToUpperInvariant()+"|"+title.ToUpperInvariant()+"|"+SmartMatching.Season(item);
+        }
+        static string ClassificationDirectory(Dictionary<string,object> item)
+        {
+            string path=Json.Text(item,"Path");
+            try {if(!String.IsNullOrWhiteSpace(path))return Path.GetFullPath(Path.GetDirectoryName(path)).TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar);}
+            catch(ArgumentException){}catch(NotSupportedException){}catch(PathTooLongException){}
+            // An unavailable path must not merge unrelated server items.
+            return "item:"+(Json.Text(item,"Id")==""?Guid.NewGuid().ToString("N"):Json.Text(item,"Id"));
+        }
+        static string ClassificationFileOrder(Dictionary<string,object> item)
+        {
+            return Regex.Replace(Path.GetFileName(Json.Text(item,"Path"))??"",@"\d+",m=>m.Value.PadLeft(20,'0'));
         }
         bool CachedAnimeHash(Dictionary<string,object> item, DandanConfig credentials)
         {
@@ -47,25 +59,28 @@ namespace DanmuCinema
                     IsAnime(new Dictionary<string,object>{{"Provider","dandan"},{"Category",First(rows[0],"TypeDescription","Type")}});
             } catch {return false;}
         }
-        /// <summary>Classify a work once, without changing server item types or media files.</summary>
+        /// <summary>Classify the first video in each directory; siblings inherit its result.</summary>
         public async Task ClassifyLibrary(Dictionary<string,object>[] items, string mediaRoot, bool rescan,
             Action<LibraryLoadProgress> progress, CancellationToken cancellation)
         {
-            var groups=items.GroupBy(x=>ClassificationIdentity(x,mediaRoot),StringComparer.OrdinalIgnoreCase).ToArray();
+            var groups=items.GroupBy(ClassificationDirectory,StringComparer.OrdinalIgnoreCase).ToArray();
             DandanConfig credentials=null;
             try{credentials=DandanConfig.Load();}catch{}
             bool online=settings.EnableDandan && credentials!=null && credentials.Ready;
             int done=0;
             foreach(var group in groups) {
                 cancellation.ThrowIfCancellationRequested();
-                var seed=group.OrderBy(x=>SmartMatching.Episode(x)==0?Int32.MaxValue:SmartMatching.Episode(x)).First();
-                string title=ClassificationTitle(seed,mediaRoot),key=DandanApiCache.Key("media-classification-v1|"+group.Key);
+                var seed=group.OrderBy(ClassificationFileOrder,StringComparer.OrdinalIgnoreCase).ThenBy(x=>Json.Text(x,"Path"),StringComparer.OrdinalIgnoreCase).First();
+                string title=ClassificationTitle(seed,mediaRoot),key=DandanApiCache.Key("media-directory-classification-v2|"+group.Key.ToUpperInvariant());
                 string cached=Cache.Read(key);bool? anime=null;bool storedAnime=false;
+                // Existing installations can reuse the representative's prior
+                // result; no sibling is hashed or queried during migration.
+                if(cached==null)cached=Cache.Read(DandanApiCache.Key("media-classification-v1|"+LegacyClassificationIdentity(seed,mediaRoot)));
                 if(cached!=null)try{var record=Json.Object(cached);storedAnime=Json.Text(record,"Anime")=="True";if(storedAnime)anime=true;else if(!rescan)anime=false;}catch{}
                 if(anime==null && online && CachedAnimeHash(seed,credentials))anime=true;
                 DateTime retry;bool cooling=classificationRetry.TryGetValue(key,out retry)&&retry>DateTime.UtcNow&&!rescan;
                 if(anime==null && online && !cooling && title.Length>=2) {
-                    if(progress!=null)progress(new LibraryLoadProgress("正在识别动漫分类 "+(done+1)+" / "+groups.Length+" · "+title,100.0*done/Math.Max(1,groups.Length)));
+                    if(progress!=null)progress(new LibraryLoadProgress("正在识别视频分类 "+(done+1)+" / "+groups.Length+" · "+title,100.0*done/Math.Max(1,groups.Length)));
                     try {
                         double wait=Math.Max(0,Math.Max(1,settings.DownloadIntervalSeconds)*1000-(DateTime.UtcNow-lastClassificationRequest).TotalMilliseconds);
                         if(wait>0)await Task.Delay((int)wait,cancellation).ConfigureAwait(false);
@@ -77,17 +92,18 @@ namespace DanmuCinema
                         // of animation. Accept a relevant official anime entry.
                         var relevant=result.Items.OfType<Dictionary<string,object>>().Where(x=>SmartMatching.Score(title,x,season)>=90).ToArray();
                         anime=relevant.Any(IsAnime);
-                        Cache.Write(key,"classification",title,Json.Write(new{Anime=anime.Value}),title);
+                        Cache.Write(key,"classification",title,Json.Write(new{Anime=anime.Value,Category=anime.Value?"动漫":MediaPresentation.BaseCategory(seed)}),title);
                         classificationRetry.Remove(key);
                     } catch {cancellation.ThrowIfCancellationRequested();classificationRetry[key]=DateTime.UtcNow.AddMinutes(10);}
                 }
-                if(anime==true) {
-                    foreach(var item in group){item["DanmuCinemaCategory"]="动漫";item["DanmuCinemaClassificationKnown"]=true;}
-                    if(!storedAnime)Cache.Write(key,"classification",title,Json.Write(new{Anime=true}),title);
-                } else if(anime==false)foreach(var item in group){item.Remove("DanmuCinemaCategory");item["DanmuCinemaClassificationKnown"]=true;}
+                if(anime.HasValue) {
+                    string category=anime.Value?"动漫":MediaPresentation.BaseCategory(seed);
+                    foreach(var item in group){item["DanmuCinemaCategory"]=category;item["DanmuCinemaClassificationKnown"]=true;}
+                    if(Cache.Read(key)==null)Cache.Write(key,"classification",title,Json.Write(new{Anime=anime.Value,Category=category}),title);
+                }
                 else foreach(var item in group)item["DanmuCinemaClassificationKnown"]=false;
                 done++;
-                if(progress!=null)progress(new LibraryLoadProgress("正在识别动漫分类 "+done+" / "+groups.Length,100.0*done/Math.Max(1,groups.Length)));
+                if(progress!=null)progress(new LibraryLoadProgress("正在识别视频分类 "+done+" / "+groups.Length,100.0*done/Math.Max(1,groups.Length)));
             }
         }
     }

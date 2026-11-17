@@ -24,7 +24,7 @@ namespace DanmuCinema
                 string authorization = "MediaBrowser Client=\"DanmuCinema\", Device=\"Windows\", DeviceId=\"danmu-lan-controller\", Version=\"1.0.0\"";
                 if (auth)
                 {
-                    if (String.IsNullOrEmpty(Token)) throw new InvalidOperationException("请先在「首次设置」中初始化服务器或登录管理员账号。");
+                    if (String.IsNullOrEmpty(Token)) throw new InvalidOperationException("请先在「设备与媒体库」中初始化服务器或登录管理员账号。");
                     authorization += ", Token=\"" + Token + "\"";
                 }
                 request.Headers.TryAddWithoutValidation("Authorization", authorization);
@@ -171,7 +171,7 @@ namespace DanmuCinema
         public async Task<byte[]> Poster(string id, string tag, CancellationToken cancellation)
         {
             if (!System.Text.RegularExpressions.Regex.IsMatch(id ?? "", "^[a-zA-Z0-9]{1,64}$") || String.IsNullOrEmpty(Token)) return null;
-            using (var request = new HttpRequestMessage(HttpMethod.Get, "http://127.0.0.1:" + settings.Port + "/Items/" + id + "/Images/Primary?maxWidth=100&quality=80&tag=" + Uri.EscapeDataString(tag ?? "")))
+            using (var request = new HttpRequestMessage(HttpMethod.Get, "http://127.0.0.1:" + settings.Port + "/Items/" + id + "/Images/Primary?maxWidth=800&quality=88&tag=" + Uri.EscapeDataString(tag ?? "")))
             {
                 request.Headers.TryAddWithoutValidation("X-Emby-Token", Token);
                 using (var response = await client.SendAsync(request, cancellation))
@@ -263,7 +263,7 @@ namespace DanmuCinema
                 }
                 if (!NetworkInfo.PortFree(settings.Port)) throw new InvalidOperationException("端口 " + settings.Port + " 已被占用。请更换端口；本程序不会关闭其他服务。");
                 string server = Paths.FindServer();
-                if (server == null) throw new FileNotFoundException("尚未安装 Jellyfin。请到「首次设置」下载运行组件。");
+                if (server == null) throw new FileNotFoundException("尚未安装 Jellyfin。请到「设备与媒体库」下载运行组件。");
                 WriteNetworkConfiguration();
                 Log.ConfigureServerRetention(settings.LogRetentionDays);
                 string parent = Path.GetDirectoryName(server);

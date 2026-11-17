@@ -1,7 +1,7 @@
 {
   "name": "danmucinema-liquid-glass",
   "productName": "DanmuCinema",
-  "version": "2.0.8",
+  "version": "2.2.8",
   "private": true,
   "type": "module",
   "main": "electron/main.cjs",
@@ -19,7 +19,8 @@
     "lucide-react": "1.61.0",
     "motion": "14.6.0",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "jassub": "2.5.37"
   },
   "devDependencies": {
     "@types/node": "26.6.5",
@@ -70,6 +71,14 @@
       {
         "from": "development/scripts/configure-firewall.ps1",
         "to": "engine/scripts/configure-firewall.ps1"
+      },
+      {
+        "from": "player",
+        "to": "player",
+        "filter": [
+          "**/*",
+          "!ui-fonts/**/*"
+        ]
       }
     ],
     "win": {
@@ -83,6 +92,11 @@
         "from": "licenses",
         "to": "licenses"
       }
+    ],
+    "asarUnpack": [
+      "electron/danmu-worker.cjs",
+      "electron/danmu.cjs",
+      "electron/vendor/**/*"
     ]
   },
   "description": "Local media service and danmu management",

@@ -1,0 +1,14 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path')
+function overlay(){
+ let now=0
+ class ASSRenderer{constructor(){this.paints=[];this._gpurender={render(){}}} _draw(time,repaint){this.paints.push({time,repaint})}}
+ ASSRenderer.prototype[Symbol.for('constructor')]=async function(){return this}
+ class FrameClock{constructor(draw,options){this.draw=draw;this.options=options;this.running=false}start(){this.running=true}stop(){this.running=false}configure(options){this.options=options}}
+ const source=fs.readFileSync(path.join(__dirname,'../player-overlay/clock-worker.js'),'utf8').replace(/^import .*$/gm,'').replaceAll('import.meta.env.VITE_DANMU_OVERLAY_DEADLINE',"'1'").replaceAll(/import\.meta\.env\.[A-Z_]+/g,"'0'")
+ vm.runInNewContext(source,{ASSRenderer,FrameClock,GPUQueue:class{},performance:{now:()=>now},requestAnimationFrame(){throw Error('Paused overlays must not start an idle RAF loop')},cancelAnimationFrame(){},clearTimeout(){},setTimeout(){throw Error('Unexpected GPU retry without a busy queue')}})
+ return{instance:new ASSRenderer(),advance(value){now=value}}
+}
+test('paused seek repaints at the new media time without resuming the clock',()=>{const {instance:p,advance}=overlay();p.startClock({time:10,paused:true,displayHz:200});assert.equal(p.paints.at(-1).time,10);advance(500);p.sampleClock({time:22,speed:1,paused:true,reset:true});assert.equal(p.paints.at(-1).time,22);assert.equal(p.cinemaClock.scheduler.running,false);assert.equal(p.paints.at(-1).repaint,true)})
+test('paused offset and resize repaint once while the scheduler remains stopped',()=>{const {instance:p}=overlay();p.startClock({time:10,paused:true,displayHz:200});p.configureClock({offset:2});assert.equal(p.paints.at(-1).time,8);const before=p.paints.length;p.redrawClock();assert.equal(p.paints.length,before+1);assert.equal(p.paints.at(-1).time,8);assert.equal(p.cinemaClock.scheduler.running,false);p.configureClock({fps:120});assert.equal(p.paints.length,before+1)})
+test('resume starts the existing scheduler and stop discards it',()=>{const {instance:p}=overlay();p.startClock({time:10,paused:true});const scheduler=p.cinemaClock.scheduler;p.sampleClock({time:10,speed:1,paused:false,reset:true});assert.equal(scheduler.running,true);p.stopClock();assert.equal(scheduler.running,false);assert.equal(p.cinemaClock,null)})
+test('long playback still detects a late frame after the bounded diagnostic arrays fill',()=>{const {instance:p,advance}=overlay();p.startClock({time:0,paused:false,displayHz:200});p.clockStats(true);for(let i=0;i<15000;i++){advance(i*5);p.cinemaClock.tick(i*5,'raf')}advance(75010);p.cinemaClock.tick(75010,'raf');const s=p.clockStats();assert.equal(s.times.length,12000);assert.equal(s.frameIntervals,15000);assert.equal(s.frameMisses,1);assert.equal(s.frameMax,15);assert.equal(s.draws,15001)})

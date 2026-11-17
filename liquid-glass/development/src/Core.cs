@@ -35,6 +35,7 @@ namespace DanmuCinema
         public bool EnableExistingDanmu { get; set; }
         public bool EnableDandan { get; set; }
         public bool AnimeOnly { get; set; }
+        public bool AutoMatchDanmu { get; set; }
         public string DandanAppId { get; set; }
         public string EncryptedDandanSecret { get; set; }
         public string EncryptedAdditionalApis { get; set; }
@@ -55,6 +56,7 @@ namespace DanmuCinema
             DanmuPort = 9321;
             EnableAnimeko = EnableBahamut = EnableExistingDanmu = EnableDandan = true;
             AnimeOnly = true;
+            AutoMatchDanmu = true;
             CacheRetentionMonths = 3;
             DownloadIntervalSeconds = 3;
             UiScalePercent = 100;

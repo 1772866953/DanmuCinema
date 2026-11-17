@@ -1,0 +1,24 @@
+.duration-picker{--duration-row:32px;--duration-rows:5;--duration-edge:2;--duration-font:14px;position:relative;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%;height:calc(var(--duration-row)*var(--duration-rows) + 2px);border:1px solid #ffffff80;border-radius:22px;background:linear-gradient(145deg,#f3fffa24,#7baba310);isolation:isolate;overflow:hidden}
+.duration-selection{position:absolute;left:9px;right:9px;top:calc(var(--duration-row)*var(--duration-edge) - 1px);height:calc(var(--duration-row) + 2px);border:1px solid #ffffffb3;border-radius:11px;background:linear-gradient(110deg,#f3fffb70,#d7eae85c);box-shadow:0 2px 7px #284e4b0a;pointer-events:none}
+.duration-column{position:relative;min-width:0;min-height:0;height:calc(var(--duration-row)*var(--duration-rows))}
+.duration-wheel{position:relative;height:100%;padding:calc(var(--duration-row)*var(--duration-edge)) 0;overflow-x:hidden;overflow-y:auto;scrollbar-width:none;scroll-snap-type:y mandatory;overscroll-behavior:contain;outline:0;touch-action:pan-y;user-select:none;mask-image:linear-gradient(transparent,#000 35%,#000 65%,transparent)}
+.duration-wheel::-webkit-scrollbar{display:none}
+.duration-wheel[data-dragging=true]{scroll-snap-type:none}
+.duration-option{height:var(--duration-row);display:flex;align-items:center;justify-content:center;padding-right:26px;scroll-snap-align:center;font-size:var(--duration-font);font-weight:400;font-variant-numeric:tabular-nums;color:#546f75;line-height:1;cursor:default}
+.duration-option[data-selected=true]{color:#244b51;font-weight:500}
+.duration-unit{position:absolute;top:calc(var(--duration-row)*var(--duration-edge));right:12%;height:var(--duration-row);display:flex;align-items:center;font-size:11px;color:#3e6269;pointer-events:none}
+.duration-picker[data-disabled=true]{pointer-events:none}
+.schedule-duration{grid-column:1/-1;min-width:0}
+.schedule-duration>.duration-label{display:block;font-size:11px;color:#425c72;margin:7px 0 8px}
+.schedule-fields .duration-presets{grid-column:1/-1;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin:2px 0 6px}
+.schedule-fields .duration-presets>.glass-button{font-size:10px;min-height:29px}
+.schedule-fields .duration-presets .glass-content{padding:6px 4px}
+@media(max-height:780px){.duration-picker{--duration-row:27px;--duration-font:13px;border-radius:18px}.schedule-duration>.duration-label{margin:2px 0 6px}}
+
+@media(max-height:600px){.duration-picker{--duration-row:30px;--duration-rows:3;--duration-edge:1}.schedule-fields .duration-presets{margin:0;gap:5px}.schedule-fields .duration-presets>.glass-button{min-height:27px}.schedule-fields .duration-presets .glass-content{padding:5px 3px}.schedule-duration>.duration-label{margin:0 0 4px}}
+.duration-picker.time-of-day{--duration-row:28px;--duration-rows:3;--duration-edge:1}
+.schedule-fields .schedule-date{grid-column:1/-1}
+.schedule-fields .week-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-column:1/-1;gap:5px}
+.schedule-fields .week-days>.glass-button{min-width:0;min-height:29px;font-size:10px}
+.schedule-fields .week-days .glass-content{padding:6px 2px}
+@media(max-height:600px){.duration-picker.time-of-day{--duration-row:24px}.schedule-fields .schedule-date>.field{display:grid;grid-template-columns:62px minmax(0,1fr);align-items:center;margin:2px 0}.schedule-clock>.duration-label{margin:1px 0 4px}}

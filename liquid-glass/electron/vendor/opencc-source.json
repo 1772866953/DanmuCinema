@@ -1,0 +1,13 @@
+{
+  "name": "opencc-js",
+  "version": "1.4.2",
+  "repository": "https://github.com/nk2028/opencc-js",
+  "tarball": "https://registry.npmjs.org/opencc-js/-/opencc-js-1.4.2.tgz",
+  "integrity": "sha512-EdcspgdROiCCZDM+jZR6Pa670xW+EW2QhctPBQ8gRjg6lrx4IHEl+2s+kt5izk/TkxVRgdWuFgaGkaEdIUfdaw==",
+  "file": "dist/umd/t2cn.js",
+  "sha256": "5009384a6bdc904babee967a8bb9928e3c92288ec8a89ed036d53257e74cd8ab",
+  "licenses": [
+    "MIT (code)",
+    "Apache-2.0 (dictionary data)"
+  ]
+}

@@ -34,3 +34,13 @@ liquid-glass/tools/
 *.partial
 **/dandanplay.json
 **/dandanplay.json.*
+
+# Local archives, generated UI fonts and personal publishing media
+/backups/
+/artifacts/
+/legacy-ui/
+/视频/
+liquid-glass/player/ui-fonts/
+**/__pycache__/
+*.tmp
+*.dmp

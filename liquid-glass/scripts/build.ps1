@@ -9,6 +9,7 @@ if (!(Test-Path -LiteralPath $taskNode)) { $taskNode = (Get-Command node -ErrorA
 if (!(Test-Path -LiteralPath $taskPwsh)) { $taskPwsh = (Get-Command pwsh -ErrorAction Stop).Source }
 Push-Location $taskProject
 try {
+    & (Join-Path $PSScriptRoot 'prepare-mpv.ps1')
     & $taskPwsh -NoProfile -ExecutionPolicy Bypass -File development/scripts/build.ps1 -ForInstaller
     if ($LASTEXITCODE) { throw 'Media core build failed.' }
     & $taskNode node_modules/typescript/bin/tsc --noEmit

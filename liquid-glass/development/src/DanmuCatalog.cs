@@ -382,6 +382,16 @@ namespace DanmuCinema
             if (Regex.IsMatch(category, "电影|電影|剧场|劇場|movie", RegexOptions.IgnoreCase)) return false;
             return Regex.IsMatch(category, "电视剧|電視劇|TV|动漫|动画|動畫|番剧|番劇", RegexOptions.IgnoreCase) || Int32.TryParse(Json.Text(item,"EpisodeSize"),out count) && count > 1;
         }
+        public static bool IsSeries(Dictionary<string, object> item, IEnumerable<Dictionary<string, object>> completeEpisodes)
+        {
+            if (IsSeries(item)) return true;
+            // Hash matches may only say "网络放送" and omit EpisodeCount. A
+            // complete numbered episode list is stronger evidence than that label.
+            // Explicit movies stay protected; sharing a local directory is not proof.
+            if (Regex.IsMatch(Json.Text(item,"Category"), "电影|電影|剧场|劇場|movie", RegexOptions.IgnoreCase)) return false;
+            var rows=completeEpisodes.Where(e=>SmartMatching.RemoteNumber(e)>0 && !String.IsNullOrEmpty(Json.Text(e,"Id"))).ToArray();
+            return rows.Select(e=>Json.Text(e,"Id")).Distinct().Count()>1 && rows.Select(SmartMatching.RemoteNumber).Distinct().Count()>1;
+        }
         public Dictionary<string, object> KnownAnime(string id)
         { lock(sync) { Dictionary<string,object> anime; return animes.TryGetValue(id, out anime) ? anime : null; } }
         public async Task<Dictionary<string, object>[]> LocalSeason(Dictionary<string, object> item)
@@ -427,7 +437,14 @@ namespace DanmuCinema
                 var bangumi = Json.Child(result, "Bangumi");
                 foreach (Dictionary<string, object> e in Json.Array(bangumi, "Episodes")) list.Add(Episode(anime, Json.Text(e, "EpisodeId"), Json.Text(e, "EpisodeNumber"), Json.Text(e, "EpisodeTitle")));
             }
-            lock (sync) { foreach (Dictionary<string, object> e in list) episodes[Json.Text(e, "Id")] = e; SaveCache(); }
+            lock (sync) {
+                var complete=list.OfType<Dictionary<string,object>>().ToArray();
+                if(IsSeries(anime,complete)) {
+                    int count=complete.Select(e=>Json.Text(e,"Id")).Distinct().Count();
+                    if(count>1){anime["EpisodeSize"]=count.ToString(CultureInfo.InvariantCulture);anime["EpisodeListVerified"]=true;animes[Json.Text(anime,"Id")]=anime;}
+                }
+                foreach (Dictionary<string, object> e in list) episodes[Json.Text(e, "Id")] = e; SaveCache();
+            }
             return list.ToArray();
         }
         static Dictionary<string, object> Episode(Dictionary<string, object> a, string remote, string number, string title)

@@ -46,20 +46,34 @@ namespace DanmuCinema.Desktop
         public readonly MediaLibrary Library = new MediaLibrary();
         public readonly DesktopSession Session = new DesktopSession();
         public readonly Scheduler Scheduler = new Scheduler(new SystemClock());
+        public SavedSchedule CurrentSchedule;
+        readonly PersistentSchedule persistentSchedule;
+        EventWaitHandle scheduleStopRequest, scheduleStopAck;
+        RegisteredWaitHandle scheduleStopWait;
+        string scheduleError;
         public bool FrontendVisible;
         public bool Headless;
         public event Action RequestForeground;
-        public void StartHeadless() { SystemEvents.PowerModeChanged += PowerChanged; statusTimer.Start(); }
+        public void StartHeadless() {
+            SystemEvents.PowerModeChanged += PowerChanged; statusTimer.Start();
+            scheduleStopRequest=new EventWaitHandle(false,EventResetMode.AutoReset,PersistentSchedule.StopEventName(Paths.Root));
+            scheduleStopAck=new EventWaitHandle(false,EventResetMode.ManualReset,PersistentSchedule.StopEventName(Paths.Root)+".ack");
+            scheduleStopWait=ThreadPool.RegisterWaitForSingleObject(scheduleStopRequest,(state,timedOut)=>application.Dispatcher.BeginInvoke(new Action(async()=>{
+                if(disposed)return;
+                try{await StopAll();if(scheduleStopAck!=null)scheduleStopAck.Set();}catch(Exception e){Log.Write("定时停止服务："+e.Message);}
+            })),null,Timeout.Infinite,false);
+            RefreshSchedule(true);
+        }
         public async Task ShutdownHeadless()
         {
-            Closing = true; statusTimer.Stop();
-            CancelSchedule();
+            Closing = true; statusTimer.Stop(); scheduleTimer.Stop(); ReleaseAwake();
             if (libraryCancellation != null) libraryCancellation.Cancel();
             CancelBatch(); PausePreparation();
             if (currentDownload != null && !currentDownload.Completion.Task.IsCompleted) {
                 currentDownload.Cancellation.Cancel(); await currentDownload.Completion.Task;
             }
             await StopAll();
+            if (scheduleStopAck != null) scheduleStopAck.Set();
         }
         public event Action Changed;
         public string Status = "就绪", ServerStatus = "已停止", PluginStatus = "启动并登录后检测", SessionStatus = "暂无播放", ScheduleStatus = "尚未设置定时任务";
@@ -77,13 +91,13 @@ namespace DanmuCinema.Desktop
         readonly DispatcherTimer statusTimer, scheduleTimer;
         CancellationTokenSource batchCancellation;
         CancellationTokenSource libraryCancellation;
-        bool checking, disposed, warningShown, awakeHeld, weeklyKeepAwake;
+        bool checking, disposed, warningShown, awakeHeld;
         DateTime lastLibraryAttempt, lastLibraryRefresh;
         public DesktopController(Application application, AppSettings settings, bool infrastructure = true, DanmuCatalog catalog = null)
             : this(application, settings, infrastructure, catalog, null) { }
         public DesktopController(Application application, AppSettings settings, bool infrastructure, DanmuCatalog catalog, System.Net.Http.HttpMessageHandler jellyfinHandler)
         {
-            this.application = application; Settings = settings;
+            this.application = application; Settings = settings; persistentSchedule = new PersistentSchedule(Paths.Root);
             Log.Configure(settings.LogRetentionDays);
             Services = new ServiceManager(settings, jellyfinHandler); Gateway = new DanmuGateway(settings, catalog);
             Automatic = new AutomaticDanmu(settings, Services.Api, Gateway.Catalog, () => Services.OwnsProcess && !Services.Transitioning && !Closing && !Busy && !BatchRunning && !CancellingDownloads);
@@ -92,7 +106,7 @@ namespace DanmuCinema.Desktop
             Gateway.PreparePlayback = Automatic.PrepareForPlayback;
             statusTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(30) };
             statusTimer.Tick += StatusTick;
-            scheduleTimer = new DispatcherTimer(DispatcherPriority.Normal) { Interval = TimeSpan.FromMilliseconds(250) };
+            scheduleTimer = new DispatcherTimer(DispatcherPriority.Normal) { Interval = TimeSpan.FromSeconds(1) };
             scheduleTimer.Tick += ScheduleTick;
         }
         public string LocalUrl { get { return "http://127.0.0.1:" + Settings.Port; } }
@@ -170,7 +184,7 @@ namespace DanmuCinema.Desktop
             }
             finally { if (resume && !Closing) Automatic.Start(); }
         }
-        async void StatusTick(object sender, EventArgs e) { Log.CleanupIfDue(); await UpdateStatus(); }
+        async void StatusTick(object sender, EventArgs e) { Log.CleanupIfDue(); if (!Closing && !disposed && CurrentSchedule != null && CurrentSchedule.Active) RefreshSchedule(true); await UpdateStatus(); }
         public async Task UpdateStatus()
         {
             if (checking || Closing || disposed || Services.Transitioning || Busy || BatchRunning) return;
@@ -228,7 +242,7 @@ namespace DanmuCinema.Desktop
                 },cancellation.Token);
                 bool classificationSynced=true;
                 try {await Services.Api.SyncClassification(items,cancellation.Token);}
-                catch {cancellation.Token.ThrowIfCancellationRequested();classificationSynced=false;Log.Write("影片列表分类已完成，客户端动漫信息暂未同步；请确认已安装最新组件，之后重新扫描重试。");}
+                catch {cancellation.Token.ThrowIfCancellationRequested();classificationSynced=false;Log.Write("影片列表分类已完成，客户端视频分类暂未同步；请确认已安装最新组件，之后重新扫描重试。");}
                 LibraryProgress = new LibraryLoadProgress("正在整理影片列表…"); Status = LibraryProgress.Message; Publish();
                 var entries = await Task.Run(() => MediaLibrary.Build(items));
                 if (disposed || Closing) return;
@@ -353,72 +367,62 @@ namespace DanmuCinema.Desktop
         {
             if (Closing || Scheduler.Active || Scheduler.State == ScheduleState.Executing) return;
             PowerActions.Validate(action);
-            try
-            {
+            try {
                 if (delay.HasValue) Scheduler.StartDelay(delay.Value, action);
-                else
-                {
-                    var local = DateTime.SpecifyKind(localTime.Value, DateTimeKind.Unspecified);
-                    if (TimeZoneInfo.Local.IsInvalidTime(local) || TimeZoneInfo.Local.IsAmbiguousTime(local)) throw new ArgumentException("此时间处于夏令时切换区间，请使用倒计时。");
-                    Scheduler.StartAt(new DateTimeOffset(local, TimeZoneInfo.Local.GetUtcOffset(local)), action);
+                else {
+                    var local=DateTime.SpecifyKind(localTime.Value,DateTimeKind.Unspecified);
+                    if(TimeZoneInfo.Local.IsInvalidTime(local)||TimeZoneInfo.Local.IsAmbiguousTime(local))throw new ArgumentException("此时间处于夏令时切换区间，请使用倒计时。");
+                    Scheduler.StartAt(new DateTimeOffset(local,TimeZoneInfo.Local.GetUtcOffset(local)),action);
                 }
-                if (awake) { PowerActions.KeepAwake(true); awakeHeld = true; }
-                weeklyKeepAwake = false;
-                ScheduleInitial = Scheduler.Remaining.TotalSeconds; warningShown = false;
-                ScheduleStatus = "定时" + PowerActions.Name(action) + "进行中"; scheduleTimer.Start(); Publish();
-            }
-            catch { Scheduler.Cancel(); ReleaseAwake(); throw; }
-        }
-        public void CancelSchedule()
-        {
-            if (!Scheduler.Cancel()) return;
-            weeklyKeepAwake = false;
-            scheduleTimer.Stop(); ReleaseAwake(); ScheduleStatus = "已取消定时，原定操作不会执行。"; Log.Write(ScheduleStatus); UpdateTraySchedule(); Publish();
+                CurrentSchedule=persistentSchedule.Start(Scheduler.Target,action,delay.HasValue?"delay":"at",0,delay.HasValue?TimeSpan.Zero:Scheduler.Target.ToLocalTime().TimeOfDay,awake,delay.HasValue?(int)delay.Value.TotalSeconds:0);
+                ScheduleInitial=Scheduler.Remaining.TotalSeconds;warningShown=false;RefreshSchedule(false);
+            } catch { Scheduler.Cancel();ReleaseAwake();throw; }
         }
         public void StartWeeklySchedule(int days, TimeSpan time, PowerAction action, bool awake)
         {
-            if (Closing || Scheduler.Active || Scheduler.State == ScheduleState.Executing) return;
+            if(Closing||Scheduler.Active||Scheduler.State==ScheduleState.Executing)return;
             PowerActions.Validate(action);
-            try
-            {
-                Scheduler.StartWeekly(days, time, action);
-                if (awake) { PowerActions.KeepAwake(true); awakeHeld = true; }
-                weeklyKeepAwake = awake;
-                ScheduleInitial = Scheduler.Remaining.TotalSeconds; warningShown = false;
-                ScheduleStatus = "每周" + PowerActions.Name(action) + "计划进行中"; scheduleTimer.Start(); Publish();
-            }
-            catch { Scheduler.Cancel(); ReleaseAwake(); throw; }
+            try {
+                Scheduler.StartWeekly(days,time,action);
+                CurrentSchedule=persistentSchedule.Start(Scheduler.Target,action,"weekly",days,time,awake,0);
+                ScheduleInitial=Scheduler.Remaining.TotalSeconds;warningShown=false;RefreshSchedule(false);
+            } catch {Scheduler.Cancel();ReleaseAwake();throw;}
+        }
+        public void CancelSchedule()
+        {
+            persistentSchedule.Cancel();Scheduler.Cancel();CurrentSchedule=persistentSchedule.Read();
+            scheduleTimer.Stop();ReleaseAwake();ScheduleStatus="已取消定时，原定操作不会执行。";Log.Write(ScheduleStatus);Publish();
+        }
+        void RefreshSchedule(bool verify)
+        {
+            try {
+                var previous=CurrentSchedule;CurrentSchedule=persistentSchedule.Reconcile(verify);Scheduler.ObserveExternal(CurrentSchedule);scheduleError=null;
+                if(CurrentSchedule==null){ScheduleStatus="尚未设置定时任务";scheduleTimer.Stop();ReleaseAwake();return;}
+                ScheduleStatus=CurrentSchedule.Message;
+                if(CurrentSchedule.Active){
+                    if(CurrentSchedule.State=="Waiting"){
+                        ScheduleStatus=(CurrentSchedule.Weekly?"每周":"定时")+PowerActions.Name((PowerAction)CurrentSchedule.Action)+"进行中 · 已保存至 Windows";
+                        if(CurrentSchedule.Message!=null&&CurrentSchedule.Message.StartsWith("定时操作失败"))ScheduleStatus=CurrentSchedule.Message+" 下次计划保留。";
+                        if(CurrentSchedule.Target<DateTimeOffset.UtcNow)ScheduleStatus="已到执行时间，等待 Windows 任务计划程序响应。";
+                        if(CurrentSchedule.Awake&&!awakeHeld){PowerActions.KeepAwake(true);awakeHeld=true;}
+                    }else ReleaseAwake();
+                    if(previous==null||previous.Id!=CurrentSchedule.Id||previous.TargetUtc!=CurrentSchedule.TargetUtc)warningShown=false;
+                    scheduleTimer.Start();
+                }else{scheduleTimer.Stop();ReleaseAwake();}
+                Publish();
+            }catch(Exception e){if(scheduleError!=e.Message){scheduleError=e.Message;Log.Write("读取定时计划："+e.Message);}ScheduleStatus="无法读取系统定时计划："+e.Message;Publish();}
         }
         void PowerChanged(object sender, PowerModeChangedEventArgs e)
-        { if (e.Mode == PowerModes.Resume) application.Dispatcher.BeginInvoke(new Action(() => { if (!disposed) { Scheduler.OnResume(); warningShown = false; } })); }
-        async void ScheduleTick(object sender, EventArgs e)
+        { if(e.Mode==PowerModes.Resume)application.Dispatcher.BeginInvoke(new Action(()=>{if(!disposed){warningShown=false;RefreshSchedule(true);}})); }
+        void ScheduleTick(object sender, EventArgs e)
         {
-            if (!Scheduler.Active || Closing) return;
-            if (Busy || Loading || BatchRunning) { UpdateTraySchedule(); Publish(); return; }
-            if (!warningShown && Scheduler.State == ScheduleState.Warning && Scheduler.Remaining <= TimeSpan.Zero) Scheduler.OnResume();
-            bool execute = Scheduler.Poll();
-            if (Scheduler.State == ScheduleState.Warning && !warningShown)
-            {
-                warningShown = true; Session.Page = "schedule"; ShowWindow();
-                Notify("即将" + PowerActions.Name(Scheduler.Action), "可取消定时或按 Esc。执行阶段开始后无法撤回。");
+            if(Closing||disposed)return;RefreshSchedule(false);
+            if(CurrentSchedule==null||!CurrentSchedule.Active||CurrentSchedule.State=="Executing")return;
+            if(!warningShown&&Scheduler.State==ScheduleState.Warning&&Scheduler.Remaining>TimeSpan.Zero){
+                // Background schedule updates must not activate, restore or
+                // recreate the user's window (including the tray state).
+                warningShown=true;Notify("即将"+PowerActions.Name(Scheduler.Action),"可在执行前取消定时。退出程序后计划仍然有效。");
             }
-            UpdateTraySchedule(); Publish(); if (!execute) return;
-            scheduleTimer.Stop(); ReleaseAwake(); Busy = true;
-            ScheduleStatus = "正在执行" + PowerActions.Name(Scheduler.Action) + "，无法再取消。"; Publish();
-            try { if (Scheduler.Action == PowerAction.StopServices) await StopAll(); else await Task.Run(() => PowerActions.Execute(Scheduler.Action)); Scheduler.Finish(true); ScheduleStatus = "定时操作已完成。"; }
-            catch (Exception error) { Scheduler.Finish(false); ScheduleStatus = "执行失败：" + error.Message; ShowWindow(); Notify("定时操作失败", error.Message); }
-            finally
-            {
-                Busy = false;
-                if (Scheduler.Active && !Closing)
-                {
-                    try { if (weeklyKeepAwake) { PowerActions.KeepAwake(true); awakeHeld = true; } warningShown = false; ScheduleInitial = Scheduler.Remaining.TotalSeconds; scheduleTimer.Start(); }
-                    catch (Exception error) { Scheduler.Cancel(); weeklyKeepAwake = false; ScheduleStatus = "计划已停止：" + error.Message; }
-                }
-                else weeklyKeepAwake = false;
-                Log.Write(ScheduleStatus); UpdateTraySchedule(); Publish();
-            }
-            await UpdateStatus();
         }
         void UpdateTraySchedule() { }
         void ReleaseAwake() { if (!awakeHeld) return; try { PowerActions.KeepAwake(false); } catch (Exception e) { Log.Write(e.Message); } finally { awakeHeld = false; } }
@@ -431,7 +435,10 @@ namespace DanmuCinema.Desktop
             if (disposed) return; disposed = true;
             statusTimer.Stop(); statusTimer.Tick -= StatusTick; scheduleTimer.Stop(); scheduleTimer.Tick -= ScheduleTick;
             SystemEvents.PowerModeChanged -= PowerChanged;
-            Scheduler.Cancel(); ReleaseAwake();
+            ReleaseAwake();
+            if(scheduleStopWait!=null)scheduleStopWait.Unregister(null);
+            if(scheduleStopRequest!=null)scheduleStopRequest.Dispose();
+            if(scheduleStopAck!=null)scheduleStopAck.Dispose();
             if (preparationCancellation != null) preparationCancellation.Cancel();
             if (libraryCancellation != null) libraryCancellation.Cancel();
             Automatic.Progress -= AutoProgress; Automatic.Saved -= AutoSaved; Automatic.Dispose();

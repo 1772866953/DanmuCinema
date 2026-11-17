@@ -1,0 +1,27 @@
+.player-panel{display:flex;flex-direction:column;gap:18px;min-width:0}.player-status{display:flex;flex-direction:column;gap:7px;padding:14px 17px;background:rgba(53,112,102,.1);border:1px solid rgba(255,255,255,.65);border-radius:17px}.player-status strong{overflow-wrap:anywhere}.player-status span{font-size:13px;color:var(--muted,#54706c)}.player-section{border:1px solid rgba(255,255,255,.55);background:rgba(255,255,255,.12);border-radius:18px;padding:16px}.player-section h3{font-size:15px;margin:0 0 13px}.player-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px 20px;margin:14px 0}.player-grid .field{min-width:0}.player-panel input[type=range]{accent-color:#308c7f;cursor:default;width:100%}.player-checks{display:flex;flex-direction:column;gap:11px}.player-diagnostics{display:flex;flex-direction:column;gap:7px;font-size:12px;overflow-wrap:anywhere}.player-diagnostics .glass-button{align-self:flex-start}.player-shortcuts{font-size:12px;line-height:1.8;color:var(--muted,#54706c);margin:0}.player-section p{font-size:12px;line-height:1.8}.player-launch{margin-left:auto;flex-shrink:0}.media-name>.player-launch{min-width:36px}.player-panel .control-host{min-width:0}@media(max-width:760px){.player-grid{grid-template-columns:minmax(0,1fr)}}
+
+.player-grid .glass-slider{width:100%}.player-grid .field>span{font-size:12px}.player-panel .glass-slider input[type=range]{width:100%}
+
+.player-panel .glass-slider input[type=range]{position:absolute;inset:0;appearance:none;width:100%;height:46px;margin:0;padding:0;border:0;background:transparent;cursor:default;touch-action:none;border-radius:99px}
+
+/* Keep the moving circular lens outside the fixed hit target. Text-row rules must not clip it. */
+.media-name>.glass-button.player-launch{display:inline-flex;overflow:visible;text-overflow:clip;align-items:center;justify-content:center;width:32px;height:32px;min-width:32px;min-height:32px;border-radius:50%;isolation:auto}
+.media-name>.player-launch>.glass-content{overflow:visible;padding:0}
+
+
+
+.player-auto-match{padding:14px 16px;margin-bottom:16px;border:1px solid var(--rim-soft);border-radius:16px;background:var(--surface-soft,rgba(255,255,255,.08))}.player-auto-match p{margin:7px 0 0;font-size:13px}
+.player-section-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:18px;padding-top:5px}
+.player-section-actions>.glass-button{min-height:42px}
+.player-section-actions>.glass-button>.glass-content{padding:11px 19px}
+.player-section>p{margin-top:14px}
+.player-panel .field{margin:5px 0 12px;gap:11px}
+.player-panel .player-grid{row-gap:20px;align-items:start}
+.player-panel .numeric-setting{min-height:48px}
+.player-offset{gap:10px;min-height:48px}
+.player-offset>.number-field{width:134px;flex:0 0 134px}
+.player-diagnostics{margin-top:15px;gap:10px}
+.player-diagnostics>.glass-button{margin-top:5px}
+@media(max-width:500px){.numeric-setting{gap:10px}.numeric-setting-value{flex-basis:124px}.slider-value{flex-basis:96px;padding-inline:8px}}
+
+.subtitle-color{display:flex;align-items:center;gap:12px;min-width:0}.subtitle-color>input[type=color]{appearance:none;flex:0 0 42px;width:42px;height:40px;border:1px solid #ffffffad;border-radius:12px;padding:6px;background:#ffffff24}.subtitle-color>input[type=color]::-webkit-color-swatch-wrapper{padding:0}.subtitle-color>input[type=color]::-webkit-color-swatch{border:0;border-radius:6px}.subtitle-color>.input{flex:1;min-width:0}

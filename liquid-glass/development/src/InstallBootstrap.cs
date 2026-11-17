@@ -40,6 +40,7 @@ namespace DanmuCinema
             if (args[0] == "--installer-cleanup")
             {
                 if (Running()) return 10;
+                try { var schedule = new PersistentSchedule(Paths.Root); if(File.Exists(schedule.FileName))schedule.Cancel(true); } catch { return 1; }
                 if (AutoStart.Enabled) AutoStart.Set(false);
                 return 0;
             }

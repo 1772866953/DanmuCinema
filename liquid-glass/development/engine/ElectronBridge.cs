@@ -16,11 +16,16 @@ namespace DanmuCinema.Desktop
         readonly DesktopController core;
         readonly StreamWriter output;
         readonly Application app;
+        int coverGeneration;
+        readonly object posterSync = new object();
         readonly SemaphoreSlim mutation = new SemaphoreSlim(1, 1);
         Dictionary<string, object>[] sources = new Dictionary<string, object>[0], episodes = new Dictionary<string, object>[0];
         Dictionary<string, object> episodeAnime;
         Dictionary<string,object>[] searchContext = new Dictionary<string,object>[0];
         readonly Dictionary<string, MediaDeletePlan> deletions = new Dictionary<string, MediaDeletePlan>();
+        readonly MediaFileRenamer fileRenamer = new MediaFileRenamer();
+        readonly Dictionary<string, CancellationTokenSource> localPlaybackJobs = new Dictionary<string, CancellationTokenSource>();
+        readonly Dictionary<string, LibraryEntry> playbackQueue = new Dictionary<string, LibraryEntry>(StringComparer.OrdinalIgnoreCase);
         public ElectronBridge(Application application, DesktopController controller, StreamWriter writer)
         { app = application; core = controller; output = writer; }
         void Send(object value) { lock (output) { output.WriteLine(Json.Write(value)); output.Flush(); } }
@@ -53,7 +58,7 @@ namespace DanmuCinema.Desktop
                             string request = line;
                             application.Dispatcher.BeginInvoke(new Action(async () => await bridge.Receive(request)));
                         }
-                        application.Dispatcher.BeginInvoke(new Action(async () => { controller.CancelSchedule(); await controller.StopAll(); application.Shutdown(); }));
+                        application.Dispatcher.BeginInvoke(new Action(async () => { await controller.ShutdownHeadless(); application.Shutdown(); }));
                     });
                     try { await controller.Initialize(Environment.GetEnvironmentVariable("DANMU_START_SERVICES") == "1"); }
                     catch (Exception error) { controller.Status = error.Message; controller.Publish(); }
@@ -69,15 +74,16 @@ namespace DanmuCinema.Desktop
                 running = core.Services.OwnsProcess, gateway = core.Gateway.Running, busy = core.Busy, loading = core.Loading,
                 progress = core.LibraryProgress == null ? null : new { message = core.LibraryProgress.Message, percent = core.LibraryProgress.Percent },
                 count = core.Library.Entries.Length, selected = core.Library.Selection.Count,
+                doubleClickMs = System.Windows.Forms.SystemInformation.DoubleClickTime,
                 settings = new { s.Port, s.DanmuPort, s.MediaFolder, s.LibraryName, s.LibraryType, s.AdminName, s.CloseToTray, s.StartServicesOnLaunch, s.PreferOriginal,
-                    s.EnableDandan, s.EnableAnimeko, s.EnableBahamut, s.EnableExistingDanmu, s.AnimeOnly, s.CacheRetentionMonths, s.DownloadIntervalSeconds, s.UiScalePercent, s.LogRetentionDays,
+                    s.EnableDandan, s.EnableAnimeko, s.EnableBahamut, s.EnableExistingDanmu, s.AnimeOnly, s.AutoMatchDanmu, s.CacheRetentionMonths, s.DownloadIntervalSeconds, s.UiScalePercent, s.LogRetentionDays,
                     customApis = SettingsStore.Unprotect(s.EncryptedAdditionalApis) },
                 batchRunning = core.BatchRunning, preparing = core.Preparing, paused = core.PreparationPaused, canCancel = core.CanCancelDownloads,
                 taskStatus = core.Preparing ? core.PreparationStatus : core.BatchStatus,
                 tasks = core.DownloadTasks.Select(x => new { id = LibraryEntry.Identity(x.Item), x.Name, x.Filename, x.Status, x.Origin, x.Detail, x.Retryable }).ToArray(),
                 plan = core.BatchPlan == null ? null : core.BatchPlan.Select((x,i) => new { index = i, x.Number, x.Selected, x.Status, local = Path.GetFileName(Json.Text(x.Local,"Path")), remote = x.Remote == null ? "" : Json.Text(x.Remote,"Title"), matched = x.Remote != null }).ToArray(),
-                schedule = new { active = core.Scheduler.Active, remaining = Scheduler.FormatRemaining(core.Scheduler.Remaining), status = core.ScheduleStatus,
-                    target = core.Scheduler.Active ? core.Scheduler.Target.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") : "", weekly = core.Scheduler.Weekly, days = core.Scheduler.WeeklyLabel,
+                schedule = new { id=core.CurrentSchedule==null?"":core.CurrentSchedule.Id, mode=core.CurrentSchedule==null?"delay":core.CurrentSchedule.Mode, action=(int)core.Scheduler.Action, awake=core.CurrentSchedule!=null&&core.CurrentSchedule.Awake, daysMask=core.CurrentSchedule==null?127:core.CurrentSchedule.Days, time=core.CurrentSchedule==null?"23:30:00":core.CurrentSchedule.Time, seconds=core.CurrentSchedule==null?1800:core.CurrentSchedule.Seconds, date=core.Scheduler.Target.ToLocalTime().ToString("yyyy-MM-dd"), active = core.Scheduler.Active || core.Scheduler.State==ScheduleState.Executing, remaining = Scheduler.FormatRemaining(core.Scheduler.Remaining), status = core.ScheduleStatus,
+                    target = core.Scheduler.Active || core.Scheduler.State==ScheduleState.Executing ? core.Scheduler.Target.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") : "", weekly = core.Scheduler.Weekly, days = core.Scheduler.WeeklyLabel,
                     warning = core.Scheduler.State == ScheduleState.Warning },
                 addresses = NetworkInfo.Addresses(), sourceChoices = core.Gateway.Catalog.SourceChoices()
             };
@@ -91,6 +97,7 @@ namespace DanmuCinema.Desktop
             try{change();SettingsStore.Save(settings);}
             catch{foreach(var property in typeof(AppSettings).GetProperties().Where(x=>x.CanRead&&x.CanWrite))property.SetValue(settings,property.GetValue(before,null),null);throw;}
         }
+        Task ClearPosters(){Interlocked.Increment(ref coverGeneration);return Task.Run(()=>{lock(posterSync){var cache=core.Gateway.Catalog.Cache;cache.Remove(cache.Entries().Where(x=>x.Kind=="poster").Select(x=>x.Key));}});}
         LibraryEntry[] Selected() { return core.Library.Entries.Where(x => core.Library.Selection.Contains(x.Key)).ToArray(); }
         Dictionary<string,object>[] SearchContext(Dictionary<string,object> p)
         {
@@ -115,9 +122,11 @@ namespace DanmuCinema.Desktop
                 request = Json.Object(line); string method = S(request,"method");
                 var p = Json.Child(request,"params") ?? new Dictionary<string, object>();
                 // Cancellation and observations must remain responsive during API calls.
-                if (!new[] { "state", "library", "logs", "history", "cache", "cancel", "pause", "scheduleCancel", "shutdown" }.Contains(method)) {
+                if (!new[] { "state", "library", "cover", "logs", "history", "cache", "cancel", "pause", "scheduleCancel", "shutdown", "playbackResolve", "playbackPrepare", "playbackCancel" }.Contains(method)) {
                     await mutation.WaitAsync(); locked = true;
                 }
+                if(new[]{"deleteConfirm","removeLibrary","cancel","refreshDanmu","downloadSingle","downloadBatch","shutdown"}.Contains(method))
+                    foreach(var playbackJob in localPlaybackJobs.Values.ToArray())playbackJob.Cancel();
                 var result = await Dispatch(method, p);
                 Send(new { id = S(request,"id"), result = result });
             }
@@ -130,30 +139,63 @@ namespace DanmuCinema.Desktop
             switch (method) {
                 case "visibility": core.FrontendVisible=B(p,"visible"); return true;
                 case "state": return State();
+                case "renameFiles": return await Task.Run(()=>MediaFileRenamer.Read(S(p,"directory"),Json.Array(p,"files").Select(Convert.ToString).ToArray(),S(p,"kind")=="video"));
+                case "renamePreview": return await Task.Run(()=>fileRenamer.Preview(Json.Array(p,"videos").Select(Convert.ToString).ToArray(),Json.Array(p,"danmu").Select(Convert.ToString).ToArray(),Json.Array(p,"matches").Select(x=>Convert.ToInt32(x)).ToArray(),B(p,"reverse"),B(p,"placeWithVideo")));
+                case "renameApply": return await Task.Run(()=>fileRenamer.Apply(S(p,"token")));
+                case "playbackResolve":
+                    var playbackKeys=Json.Array(p,"keys").Select(Convert.ToString).Distinct(StringComparer.OrdinalIgnoreCase).Take(5001).ToArray();
+                    if(playbackKeys.Length==0)playbackKeys=Selected().Select(x=>x.Key).ToArray();
+                    if(playbackKeys.Length==0||playbackKeys.Length>5000)throw new InvalidOperationException("请选择本地影片后播放。");
+                    var playbackEntries=PlaybackQueue.Resolve(core.Library.Entries,playbackKeys,B(p,"natural"),B(p,"siblings"));
+                    playbackQueue.Clear();foreach(var entry in playbackEntries)playbackQueue[entry.Key]=entry;
+                    return playbackEntries.Select(x=>new{key=x.Key,path=Path.GetFullPath(Json.Text(x.Item,"Path")),title=MediaPresentation.Title(x.Item)}).ToArray();
+                case "playbackCancel":
+                    CancellationTokenSource playbackCancel;
+                    if(localPlaybackJobs.TryGetValue(S(p,"token"),out playbackCancel))playbackCancel.Cancel();
+                    return true;
+                case "playbackPrepare":
+                    string playbackToken=S(p,"token");Guid playbackGuid;
+                    if(!Guid.TryParse(playbackToken,out playbackGuid))throw new InvalidOperationException("播放会话标识无效。");
+                    var playbackEntry=core.Library.Entries.FirstOrDefault(x=>x.Key==S(p,"key"));
+                    if(playbackEntry==null)playbackQueue.TryGetValue(S(p,"key"),out playbackEntry);
+                    if(playbackEntry==null||playbackEntry.IsFolder)throw new InvalidOperationException("影片不在当前媒体库内。");
+                    var playbackItem=new Dictionary<string,object>(playbackEntry.Item);
+                    string playbackXml=Path.ChangeExtension(Json.Text(playbackItem,"Path"),".xml");
+                    if(File.Exists(playbackXml)&&new FileInfo(playbackXml).Length>0)return new{ready=true};
+                    if(!s.AutoMatchDanmu)return new{ready=false,message="自动在线匹配已关闭，仍会加载本地弹幕"};
+                    if(localPlaybackJobs.ContainsKey(playbackToken))throw new InvalidOperationException("播放准备任务重复。");
+                    using(var playbackTimeout=new CancellationTokenSource(TimeSpan.FromMinutes(2))){
+                        localPlaybackJobs.Add(playbackToken,playbackTimeout);
+                        try{await core.Automatic.PrepareItem(playbackItem,playbackTimeout.Token,"本机播放");return new{ready=File.Exists(playbackXml)&&new FileInfo(playbackXml).Length>0};}
+                        finally{localPlaybackJobs.Remove(playbackToken);}
+                    }
                 case "start": await core.StartAll(); await core.UpdateStatus(); if(!String.IsNullOrEmpty(core.Services.Api.Token)) Background(core.LoadLibrary()); core.Publish(); return State();
                 case "stop": await core.StopAll(); await core.UpdateStatus(); core.Publish(); return State();
-                case "scan": Background(core.ScanLibrary()); return true;
-                case "refresh": Background(core.LoadLibrary()); return true;
+                case "scan": await ClearPosters(); Background(core.ScanLibrary()); return true;
+                case "refresh": await ClearPosters(); Background(core.LoadLibrary()); return true;
                 case "library":
-                    return core.Library.Browse(S(p,"directory") == "" ? null : S(p,"directory"), S(p,"filter"), (LibrarySort)Math.Max(0, Math.Min(4,I(p,"sort"))), B(p,"descending"), s.MediaFolder)
+                    return core.Library.Browse(S(p,"directory") == "" ? null : S(p,"directory"), S(p,"filter"), (LibrarySort)Math.Max(0, Math.Min(5,I(p,"sort"))), B(p,"descending"), s.MediaFolder)
                         .Select(x => new { id = x.Key, name = x.IsFolder ? x.Name : MediaPresentation.Title(x.Item), filename = x.Name, folder = x.IsFolder, path = x.IsFolder ? x.FolderPath : Json.Text(x.Item,"Path"),
                             size = x.Size.HasValue ? (double?)Math.Round(x.Size.Value / 1000000.0,2) : null, modified = x.ModifiedUtc.HasValue ? x.ModifiedUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "—",
                             type = MediaPresentation.Category(x), bitrate = x.Bitrate > 0 ? (x.Bitrate/1000000.0).ToString("0.0")+" Mbps" : "—",
                             danmu = x.IsFolder ? x.Members.Count(y => y.HasXml) + " / " + x.Members.Length + " 集已就绪" : x.DanmuLabel, count = x.IsFolder ? x.Members.Length : 1,
-                            searchTitle = x.IsFolder?MediaNames.SearchTitle(x.Members[0].Item):MediaNames.SingleSearchTitle(x.Item), keys = x.SelectionKeys, selected = x.SelectionKeys.All(core.Library.Selection.Contains), mixed = x.SelectionKeys.Any(core.Library.Selection.Contains) && !x.SelectionKeys.All(core.Library.Selection.Contains) }).ToArray();
+                            searchTitle = x.IsFolder?MediaNames.SearchTitle(x.Members[0].Item):MediaNames.SingleSearchTitle(x.Item), coverKey = x.IsFolder ? MediaCovers.First(x.Members).Key : x.Key, keys = x.SelectionKeys, selected = x.SelectionKeys.All(core.Library.Selection.Contains), mixed = x.SelectionKeys.Any(core.Library.Selection.Contains) && !x.SelectionKeys.All(core.Library.Selection.Contains) }).ToArray();
                 case "select":
                     foreach (string key in Json.Array(p,"keys").Select(Convert.ToString)) { if (core.Library.Entries.Any(x => x.Key == key)) core.Library.Selection.Set(key,B(p,"selected")); }
                     core.Publish(); return true;
                 case "selectClear": core.Library.Selection.Clear(); core.Publish(); return true;
                 case "cover":
                     var coverItem = core.Library.Entries.FirstOrDefault(x=>x.Key==S(p,"key")); if(coverItem==null)return null;
-                    string imageId=Json.Text(coverItem.Item,"SeriesId"),tag=Json.Text(coverItem.Item,"SeriesPrimaryImageTag");
-                    if(String.IsNullOrEmpty(imageId)||String.IsNullOrEmpty(tag)){imageId=Json.Text(coverItem.Item,"Id");tag=Json.Text(Json.Child(coverItem.Item,"ImageTags"),"Primary");}
-                    if(String.IsNullOrEmpty(tag))return null;
-                    string posterKey=DandanApiCache.Key("poster:"+s.ServerId+":"+imageId+":"+tag),encoded=await Task.Run(()=>core.Gateway.Catalog.Cache.Read(posterKey));
-                    if(encoded==null){if(!core.Services.OwnsProcess||String.IsNullOrEmpty(core.Services.Api.Token))return null;
-                        byte[] image=await core.Services.Api.Poster(imageId,tag,CancellationToken.None);if(image==null||image.Length==0||image.Length>4*1024*1024)return null;
-                        encoded=Convert.ToBase64String(image);core.Gateway.Catalog.Cache.Write(posterKey,"poster",MediaNames.SearchTitle(coverItem.Item),encoded,MediaNames.SearchTitle(coverItem.Item));}
+                    int coverVersion=coverGeneration;bool seriesCover=B(p,"series");var cache=core.Gateway.Catalog.Cache;
+                    string posterKey=DandanApiCache.Key("poster:v3:"+s.ServerId+":"+coverItem.Key+":"+seriesCover+":"+Json.Text(coverItem.Item,"SeriesPrimaryImageTag")+":"+Json.Text(Json.Child(coverItem.Item,"ImageTags"),"Primary"));
+                    string encoded=await Task.Run(()=>cache.Read(posterKey));
+                    if(encoded==null){
+                        byte[] image=await MediaCovers.Resolve(coverItem.Item,seriesCover,async(posterId,posterTag)=>{if(!core.Services.OwnsProcess||String.IsNullOrEmpty(core.Services.Api.Token))return null;return await core.Services.Api.Poster(posterId,posterTag,CancellationToken.None);},()=>{
+                            double ticks;Double.TryParse(Json.Text(coverItem.Item,"RunTimeTicks"),out ticks);return MediaCovers.Frame(Json.Text(coverItem.Item,"Path"),ticks>0?ticks/TimeSpan.TicksPerSecond*.1:1,CancellationToken.None);
+                        });
+                        if(image==null||image.Length==0)return null;
+                        encoded=await Task.Run(()=>{string content=Convert.ToBase64String(image);lock(posterSync){if(coverVersion==coverGeneration)cache.Write(posterKey,"poster",MediaNames.SearchTitle(coverItem.Item),content,MediaNames.SearchTitle(coverItem.Item));}return content;});
+                    }
                     return "data:image/jpeg;base64,"+encoded;
                 case "prepare": var videos = B(p,"all") ? core.Library.Entries : Selected(); if (videos.Length == 0) throw new InvalidOperationException("请先选择影片。"); core.StartPreparation(videos.Select(x=>x.Item)); return true;
                 case "pause": core.CancelBatch(); return true;
@@ -201,7 +243,7 @@ namespace DanmuCinema.Desktop
                         episodes=(await core.Gateway.Catalog.Episodes(episodeAnime)).OfType<Dictionary<string,object>>().ToArray();
                     }
                     if(episodeAnime==null || episodes.Length==0)throw new InvalidOperationException("请先选择作品并读取完整剧集。");
-                    if(chosen.Length>1 && !DanmuCatalog.IsSeries(episodeAnime))throw new InvalidOperationException("当前选择的是电影或单条弹幕来源，不能匹配整季。请返回选择对应季度的电视剧或动画来源，核对来源旁的类型和集数。");
+                    if(chosen.Length>1 && !DanmuCatalog.IsSeries(episodeAnime,episodes))throw new InvalidOperationException("当前选择的是电影或单条弹幕来源，不能匹配整季。请返回选择对应季度的电视剧或动画来源，核对来源旁的类型和集数。");
                     core.BatchPlan = BatchMatching.Plan(chosen.Select(x=>x.Item), episodes); core.BatchTitle="弹幕批量下载"; core.BatchKeep=B(p,"keep"); core.Publish(); return State();
                 case "planSelect":
                     if(core.BatchRunning) throw new InvalidOperationException("下载中不能调整列表。");
@@ -233,6 +275,10 @@ namespace DanmuCinema.Desktop
                 case "sources":
                     DanmuCatalog.ValidateAdditionalApis(S(p,"customApis"));
                     Persist(()=>{s.EnableDandan=B(p,"dandan"); s.EnableAnimeko=B(p,"animeko"); s.EnableBahamut=B(p,"bahamut"); s.EnableExistingDanmu=B(p,"existing"); s.AnimeOnly=B(p,"animeOnly"); s.EncryptedAdditionalApis=SettingsStore.Protect(S(p,"customApis"));}); core.Publish(); return true;
+                case "autoMatch":
+                    Persist(()=>{s.AutoMatchDanmu=B(p,"enabled");});core.Publish();
+                    if(!s.AutoMatchDanmu){foreach(var pendingMatch in localPlaybackJobs.Values.ToArray())pendingMatch.Cancel();bool wasRunning=core.Automatic.Running;await core.Automatic.Stop();if(wasRunning)core.Automatic.Start();}
+                    return true;
                 case "preferences":
                     int port=I(p,"port",s.Port), dp=I(p,"danmuPort",s.DanmuPort);
                     if((core.Services.OwnsProcess||core.Gateway.Running)&&(port!=s.Port||dp!=s.DanmuPort)) throw new InvalidOperationException("请先停止服务再修改端口。");
@@ -261,6 +307,7 @@ namespace DanmuCinema.Desktop
                 case "deleteConfirm":var id=S(p,"token");MediaDeletePlan pending;if(!deletions.TryGetValue(id,out pending))throw new InvalidOperationException("删除确认已过期。");deletions.Remove(id);await core.DeleteMedia(pending);return true;
                 case "firewall":await core.RunScript("configure-firewall.ps1",true);return true;
                 case "shutdown":
+                    foreach(var playbackJob in localPlaybackJobs.Values.ToArray())playbackJob.Cancel();
                     await core.ShutdownHeadless();
                     app.Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>app.Shutdown()));return true;
                 default:throw new InvalidOperationException("未知操作："+method);

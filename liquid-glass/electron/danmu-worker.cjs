@@ -1,0 +1,3 @@
+'use strict'
+const {parentPort,workerData}=require('node:worker_threads'),fs=require('node:fs/promises'),{parseXml,layout}=require('./danmu.cjs')
+;(async()=>{const stat=await fs.stat(workerData.xml);if(stat.size>64*1024*1024)throw new Error('弹幕文件过大。');const comments=parseXml(await fs.readFile(workerData.xml,'utf8'));const scene=layout(comments,workerData.options,workerData.aspect);await fs.writeFile(workerData.output,JSON.stringify(scene),'utf8');parentPort.postMessage({count:scene.count,displayed:scene.displayed,dropped:scene.dropped})})().catch(error=>{parentPort.postMessage({error:error.message});process.exitCode=1})

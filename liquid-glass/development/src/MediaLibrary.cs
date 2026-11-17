@@ -6,7 +6,7 @@ using System.Linq;
 
 namespace DanmuCinema
 {
-    public enum LibrarySort { Name, Modified, Size, Type, Bitrate }
+    public enum LibrarySort { Name, Modified, Size, Type, Bitrate, Danmu }
     public enum DanmuMatchScope { Single, Season, Selection }
 
     public sealed class LibraryEntry
@@ -140,7 +140,7 @@ namespace DanmuCinema
         static LibraryEntry[] Sort(IEnumerable<LibraryEntry> entries, LibrarySort sort, bool descending)
         {
             // Compare numeric filename segments so episode (2) precedes episode (10).
-            Func<LibraryEntry, IComparable> value = x => sort == LibrarySort.Modified ? (IComparable)x.ModifiedUtc : sort == LibrarySort.Size ? (IComparable)x.Size : sort == LibrarySort.Bitrate ? (IComparable)x.Bitrate : sort == LibrarySort.Type ? MediaPresentation.Category(x) : x.Name;
+            Func<LibraryEntry, IComparable> value = x => sort == LibrarySort.Danmu ? (IComparable)(x.IsFolder ? x.Members.Length == 0 ? 0.0 : x.Members.Count(y => y.HasXml) / (double)x.Members.Length : x.HasXml ? 1.0 : 0.0) : sort == LibrarySort.Modified ? (IComparable)x.ModifiedUtc : sort == LibrarySort.Size ? (IComparable)x.Size : sort == LibrarySort.Bitrate ? (IComparable)x.Bitrate : sort == LibrarySort.Type ? MediaPresentation.Category(x) : x.Name;
             var comparer = Comparer<IComparable>.Create((a, b) => a is string && b is string ? NaturalNames.Instance.Compare((string)a, (string)b) : a.CompareTo(b));
             var known = entries.Where(x => value(x) != null);
             var ordered = descending ? known.OrderByDescending(value, comparer) : known.OrderBy(value, comparer);

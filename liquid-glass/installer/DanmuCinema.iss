@@ -2,7 +2,7 @@
   #define PackageRoot "..\bin\installer-payload"
 #endif
 #ifndef PackageVersion
-  #define PackageVersion "2.0.8"
+  #define PackageVersion "2.2.6"
 #endif
 #ifndef OutputFolder
   #define OutputFolder "..\..\packages"
@@ -341,7 +341,8 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var Code: Integer; CleanupArgument: String;
 begin
   if CurUninstallStep = usUninstall then begin
-    Exec(ExpandConstant('{app}\resources\engine\bin\DanmuCinema.exe'), '--installer-cleanup', '', SW_HIDE, ewWaitUntilTerminated, Code);
+    if not Exec(ExpandConstant('{app}\resources\engine\bin\DanmuCinema.exe'), '--installer-cleanup', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+      RaiseException('无法清理系统定时计划或启动项。请先在软件中取消定时计划后重试。');
     if not UninstallSilent then
       if MsgBox('是否移除本安装目录创建的局域网防火墙规则？需要 Windows 管理员确认。', mbConfirmation, MB_YESNO) = IDYES then
         ShellExec('runas', ExpandConstant('{app}\resources\engine\bin\DanmuCinema.exe'), '--installer-remove-firewall', '', SW_HIDE, ewWaitUntilTerminated, Code);

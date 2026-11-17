@@ -1,0 +1,13 @@
+{
+  "version": "0.42.0-1-g3138fc8ee",
+  "architecture": "x86_64 baseline, no AVX2 requirement",
+  "release": "https://github.com/shinchiro/mpv-winbuild-cmake/releases/tag/20261105",
+  "archive": "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/20261105/mpv-x86_64-20261105-git-3138fc8eea.7z",
+  "sha256": "89aa56f9769f81f783576183212e7b4802c91909ecf860b4468113cbfd106d93",
+  "executableSha256": "63de44712d633a59b50a6ef19f91a6f51cefa6079db59c69bbd31bac03c01060",
+  "mpvCommit": "3138fc8eea",
+  "ffmpegCommit": "baa68e68b",
+  "libplaceboCommit": "0e43522",
+  "buildScriptsCommit": "bda10a2",
+  "license": "GPL-3.0-or-later combined binary (mpv GPL-2.0-or-later with FFmpeg configured --enable-version3); dependencies retain their own licenses"
+}

@@ -1,15 +1,19 @@
+/* A bundled variable font keeps small Chinese labels optically consistent.
+   Use the same native glyphs at rest and throughout the shared deformation. */
+@font-face { font-family:'DanmuCinema UI'; src:url('/fonts/noto-sans-sc.ttf') format('truetype'); font-style:normal; font-weight:100 900; font-display:block; }
 .glass-button { position:relative; display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:40px; padding:0; border:0; border-radius:var(--glass-radius,999px); color:var(--text); font-size:12px; font-weight:600; background:transparent; isolation:isolate; user-select:none; touch-action:none; }
+.glass-button.liquid-control { font-family:'DanmuCinema UI','Microsoft YaHei UI',sans-serif; }
 .glass-button, .glass-button:hover, .glass-button:active { background:transparent!important; box-shadow:none!important; transform:none; }
 .glass-button::before,.glass-button::after { display:none; }
 .glass-material { position:absolute; inset:0; border-radius:inherit; pointer-events:none; background:var(--material-fill); box-shadow:var(--material-shadow); transform-origin:center; }
 .glass-button:hover > .glass-material { background:var(--hover); }
 .glass-button:disabled { opacity:.45; }
-.glass-button > .glass-content { position:relative; z-index:2; display:flex; flex:1; min-width:0; align-items:inherit; justify-content:inherit; gap:inherit; padding:11px 18px; filter:none; text-shadow:none; backdrop-filter:none; transform-origin:center; }
+.glass-button > .glass-content { position:relative; z-index:2; display:flex; flex:1; min-width:0; align-items:inherit; justify-content:inherit; gap:inherit; padding:11px 18px; filter:none; text-shadow:none; backdrop-filter:none; -webkit-font-smoothing:antialiased; transform-origin:center; }
 .glass-native > .glass-content { padding:0; }
 .glass-button .control-text { min-width:0; }
 .glass-button > .glass-material,.glass-button > .glass-content { will-change:auto; }
 /* Promote the deforming glass only; keep text out of scaled GPU bitmap layers. */
-.glass-button:is(:hover,:focus-visible,[data-pressed='true']) > .glass-material { will-change:transform; }
+.glass-button:is(:hover,[data-pressed='true']) > .glass-material { will-change:transform; }
 .glass-rim { position:absolute; inset:0; pointer-events:none; border-radius:inherit; padding:1px; background:linear-gradient(140deg,var(--rim-bright),#ffffff40 30%,#ffffff14 50%,var(--rim-soft) 78%,#ffffffb3); -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask-composite:exclude; }
 .glass-sheen { position:absolute; inset:1px; border-radius:inherit; pointer-events:none; box-shadow:inset 0 1px 1px #ffffff3b; background:linear-gradient(165deg,#ffffff0d,transparent 40%); }
 .glass-filter-defs { position:absolute; width:0; height:0; pointer-events:none; }
@@ -32,17 +36,30 @@
 .sort-popover [role='menuitemradio'] .control-text,.sort-popover [role='menuitemradio'] .glass-content > span { flex:1; }
 .sort-popover [aria-checked='true'] { color:var(--accent); }
 .glass-slider { position:relative; height:46px; margin:12px 0 0; isolation:isolate; }
-.glass-slider-track { position:absolute; left:16px; right:16px; top:19px; height:8px; border:1px solid var(--rim-soft); border-radius:99px; background:var(--segment-track); box-shadow:inset 0 1px 3px #25344b18; overflow:hidden; pointer-events:none; }
+.glass-slider-rail {position:absolute;left:12.8px;right:12.8px;top:7px;height:32px;pointer-events:none;mask-image:linear-gradient(to right,#000 calc(var(--thumb-position) - 17.5px),transparent calc(var(--thumb-position) - 15.5px),transparent calc(var(--thumb-position) + 15.5px),#000 calc(var(--thumb-position) + 17.5px))}
+.glass-slider-track { position:absolute; left:0; right:0; top:12px; height:8px; border:1px solid var(--rim-soft); border-radius:99px; background:var(--segment-track); box-shadow:inset 0 1px 3px #25344b18; overflow:hidden; pointer-events:none; }
 .glass-slider-track > span { display:block; height:100%; border-radius:inherit; background:linear-gradient(90deg,var(--accent-soft),var(--accent)); }
-.glass-slider-travel { position:absolute; left:16px; right:16px; top:7px; height:32px; pointer-events:none; }
-.glass-thumb { position:absolute; top:0; width:32px; height:32px; margin-left:-16px; border-radius:50%; pointer-events:none; }
-.glass-thumb .glass-material { background:var(--thumb-fill); }
-.generator-controls .glass-slider input[type='range'] { position:absolute; inset:0; appearance:none; width:100%; height:46px; margin:0; padding:0; border:0; background:transparent; cursor:grab; touch-action:none; border-radius:99px; }
-.glass-slider input[type='range']:active { cursor:grabbing; }
+.glass-slider-travel { position:absolute; left:12.8px; right:12.8px; top:10.2px; height:25.6px; pointer-events:none; }
+.glass-thumb { position:absolute; top:0; width:25.6px; height:25.6px; margin-left:-12.8px; border-radius:50%; pointer-events:none; }
+.glass-thumb .glass-material {background:linear-gradient(145deg,#ffffff32,#edfef30d 60%,#a7d8d31a);overflow:hidden}
+.glass-thumb .glass-sheen{box-shadow:none;background:linear-gradient(145deg,#ffffff20,transparent 55%)}
+.glass-thumb .glass-rim{background:linear-gradient(135deg,#ffffffea,#ffffff58 38%,#d2e6e84a 68%,#ffffffbd)}
+.glass-slider input[type='range'] { position:absolute; inset:0; appearance:none; width:100%; height:46px; margin:0; padding:0; border:0; background:transparent; cursor:default; touch-action:none; border-radius:99px; }
+.glass-slider input[type='range']:active { cursor:default; }
 .glass-slider input[type='range']::-webkit-slider-runnable-track { height:8px; background:transparent; border:0; }
-.glass-slider input[type='range']::-webkit-slider-thumb { appearance:none; width:32px; height:32px; margin-top:-12px; border:0; border-radius:50%; background:transparent; box-shadow:none; }
+.glass-slider input[type='range']::-webkit-slider-thumb { appearance:none; width:25.6px; height:25.6px; margin-top:-8.8px; border:0; border-radius:50%; background:transparent; box-shadow:none; }
 .glass-slider:has(input:disabled) { opacity:.4; }
-.modal-scrim,.modal-presentation { will-change:opacity,transform; }
+.modal-presentation { will-change:auto; }
 @supports not (backdrop-filter:blur(2px)) { .glass-material { background:var(--surface); }.glass-refraction { display:none; } }
 @media(prefers-reduced-transparency:reduce) { .glass-material,.glass-panel { background:var(--surface); backdrop-filter:none; }.glass-refraction { display:none; } }
 @media(forced-colors:active) { .glass-material,.glass-refraction,.glass-highlight-clip { display:none; }.glass-button,.glass-panel { border:1px solid CanvasText!important; }.glass-button { color:ButtonText; } }
+
+/* Paint the keyboard ring above optics; a host outline can enter its own SVG sample. */
+.glass-button:focus-visible{outline:none}
+.glass-button:focus-visible::after{display:none}
+@media(forced-colors:active){.glass-button:focus-visible::after{border-color:Highlight}}
+
+.glass-slider-default{position:absolute;top:7px;width:4px;height:18px;margin-left:-2px;border-radius:2px;background:var(--text-secondary,#718477);box-shadow:0 0 0 1px var(--rim-soft);opacity:.8;pointer-events:none}
+
+/* Clear controls sample on a fixed pane; dragging their fill must not drag a second backdrop image. */
+.glass-control-backdrop{position:absolute;inset:0;border-radius:inherit;pointer-events:none}

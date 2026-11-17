@@ -56,6 +56,10 @@ namespace DanmuCinema
                     if(linked.Length>0){var current=ConfirmedWorks(local,providerId);if(linked.Any(a=>!current.Any(b=>Json.Text(a,"Id")==Json.Text(b,"Id"))))throw new InvalidDataException("同目录来源已改变。");}
                     lock(sync)foreach(var item in saved.Items.OfType<Dictionary<string,object>>()){
                         var clean=new Dictionary<string,object>(item);foreach(string field in new[]{"Priority","MatchMethod","MatchReason","SuggestedEpisodeId"})clean.Remove(field);
+                        Dictionary<string,object> verified;
+                        if(animes.TryGetValue(Json.Text(clean,"Id"),out verified)&&Json.Text(verified,"EpisodeListVerified")=="True"){
+                            clean["EpisodeSize"]=verified["EpisodeSize"];clean["EpisodeListVerified"]=true;
+                        }
                         animes[Json.Text(clean,"Id")]=clean;
                     }
                     saved.Summary="已读取本地匹配缓存。"+saved.Summary;return saved;

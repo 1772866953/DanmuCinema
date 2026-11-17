@@ -1,0 +1,12 @@
+{
+  "version": "0.3.3",
+  "repository": "https://github.com/Samillion/ModernZ",
+  "files": [
+    "modernz.lua",
+    "fonts/modernz-icons.ttf",
+    "script-opts/modernz-locale.json",
+    "LICENSE"
+  ],
+  "commit": "579897e8c974c380caa5017dc7b27a69123c1333",
+  "archiveSha256": "1EF39BF93E624C4D3EA3002BB0EDD3969013EAFC464FACD178FAFADA12784D2B"
+}

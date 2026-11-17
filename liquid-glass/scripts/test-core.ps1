@@ -1,11 +1,11 @@
-param([ValidateSet('BridgeContract','MatchingRegression','ManualSearchRegression','ManualSearchProbe','RealHashProbe','ClassificationRegression','LibraryRemovalRegression')][string]$Case='BridgeContract', [string]$InstalledRoot='', [string]$Video='')
+param([ValidateSet('BridgeContract','MatchingRegression','ManualSearchRegression','BatchSourceRegression','ManualSearchProbe','RealHashProbe','ClassificationRegression','FileRenameRegression','LibraryRemovalRegression','LocalPlaybackRegression','LibrarySortRegression','MediaCoverRegression')][string]$Case='BridgeContract', [string]$InstalledRoot='', [string]$Video='')
 $ErrorActionPreference='Stop'
 $taskProject=Split-Path -Parent $PSScriptRoot
 $taskOutput=Join-Path $taskProject ('artifacts\'+$Case.ToLowerInvariant())
 New-Item -ItemType Directory -Path $taskOutput -Force | Out-Null
 $taskCompiler=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $taskWpf=Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\WPF'
-$taskCore=Join-Path $taskProject 'development\bin\installer-app\DanmuCinema.exe'
+$taskCore=if($Case -eq 'LocalPlaybackRegression' -and $InstalledRoot){Join-Path $InstalledRoot 'resources\engine\bin\DanmuCinema.exe'}else{Join-Path $taskProject 'development\bin\installer-app\DanmuCinema.exe'}
 Copy-Item -LiteralPath $taskCore -Destination $taskOutput -Force
 Copy-Item -LiteralPath ($taskCore+'.config') -Destination $taskOutput -Force
 $taskExe=Join-Path $taskOutput ($Case+'.exe')

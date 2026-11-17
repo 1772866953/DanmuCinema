@@ -9,7 +9,11 @@ namespace DanmuCinema
     {
         public static string Category(Dictionary<string,object> item)
         {
-            if(Json.Text(item,"DanmuCinemaCategory")=="动漫")return "动漫";
+            string category=Json.Text(item,"DanmuCinemaCategory");
+            return category=="动漫"||category=="电视剧"||category=="电影"||category=="视频"?category:BaseCategory(item);
+        }
+        public static string BaseCategory(Dictionary<string,object> item)
+        {
             return SmartMatching.IsEpisodic(item)?"电视剧":Json.Text(item,"Type")=="Movie"?"电影":"视频";
         }
         public static string Category(LibraryEntry entry)

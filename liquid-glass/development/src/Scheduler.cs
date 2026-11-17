@@ -36,6 +36,14 @@ namespace DanmuCinema
         public PowerAction Action { get; private set; }
         public bool Active { get { return State == ScheduleState.Waiting || State == ScheduleState.Warning; } }
         public Scheduler(IClock clock) { this.clock = clock; State = ScheduleState.Idle; }
+        // System-scheduled plans use an absolute persisted deadline. This is a
+        // display projection only; Poll must not dispatch a second OS action.
+        public void ObserveExternal(SavedSchedule plan)
+        {
+            if (plan == null || !plan.Active) { weekly = null; graceDeadline = null; State = plan != null && plan.State == "Completed" ? ScheduleState.Completed : ScheduleState.Idle; return; }
+            relative = false; target = plan.Target; weekly = plan.Weekly ? new WeeklyPlan(plan.Days, TimeSpan.Parse(plan.Time), null) : null;
+            Begin((PowerAction)plan.Action); if (plan.State == "Executing") State = ScheduleState.Executing;
+        }
 
         public TimeSpan Remaining
         {

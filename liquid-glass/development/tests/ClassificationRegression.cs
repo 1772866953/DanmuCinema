@@ -12,7 +12,7 @@ class ClassificationRegression
 {
     sealed class Fixture:HttpMessageHandler
     {
-        public int Requests;
+        public int Requests;public readonly List<string> Queries=new List<string>();
         public int SyncRows, AnimeRows;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken cancellation)
         {
@@ -21,11 +21,12 @@ class ClassificationRegression
                 SyncRows+=syncRows.Length;AnimeRows+=syncRows.Count(x=>Json.Text(x,"Anime")=="True");
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent("{\"Updated\":0,\"Skipped\":0}")});
             }
-            Requests++;string query=System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["keyword"]??"";
+            Requests++;string query=System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["keyword"]??"";Queries.Add(query);
             if(query.Contains("网络异常"))return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest){Content=new StringContent("{}")});
             object[] rows=query.Contains("星海旅行")?new object[]{new{animeId=12,animeTitle="星海旅行 第一季",typeDescription="TV动画",episodeCount=12}}:
                 query.Contains("爱情公寓")?new object[]{new{animeId=20,animeTitle="爱情公寓 第一季",typeDescription="电视剧",episodeCount=20},new{animeId=21,animeTitle="爱情魔法",typeDescription="TV动画",episodeCount=12}}:
-                query.Contains("合成电影")?new object[]{new{animeId=30,animeTitle="合成电影",typeDescription="电影",episodeCount=1}}:new object[0];
+                query.Contains("合成电影")?new object[]{new{animeId=30,animeTitle="合成电影",typeDescription="电影",episodeCount=1}}:
+                query.Contains("海岛旅程")?new object[]{new{animeId=40,animeTitle="海岛旅程",typeDescription="TV动画",episodeCount=12}}:new object[0];
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new StringContent(Json.Write(new{success=true,animes=rows}))});
         }
     }
@@ -64,6 +65,22 @@ class ClassificationRegression
             await catalog.ClassifyLibrary(failed,settings.MediaFolder,false,null,CancellationToken.None);Check(fixture.Requests==first,"后台刷新不会连续重试异常接口");
             await catalog.ClassifyLibrary(failed,settings.MediaFolder,true,null,CancellationToken.None);Check(fixture.Requests>first,"主动重新扫描可重试异常分类");
             await api.SyncClassification(items.Concat(failed).ToArray(),CancellationToken.None);Check(fixture.SyncRows==33&&fixture.AnimeRows==12,"同步客户端时仅包含已确认的分类，接口异常作品不被错误覆盖");
+            var directoryMovies=Videos(settings.MediaFolder,"海岛旅程",12);
+            foreach(var item in directoryMovies){item["Type"]="Movie";item["SeriesName"]="";item.Remove("IndexNumber");}
+            first=fixture.Requests;var directoryProgress=new List<LibraryLoadProgress>();
+            await catalog.ClassifyLibrary(directoryMovies.Reverse().ToArray(),settings.MediaFolder,false,directoryProgress.Add,CancellationToken.None);
+            Check(directoryMovies.All(x=>MediaPresentation.Category(x)=="动漫"),"刮削为电影的同目录12集也继承首个视频的动漫分类");
+            Check(directoryProgress.Last().Message.Contains("1 / 1")&&directoryProgress.All(x=>x.Message.Contains("视频分类")),"分类进度按实际视频目录统计并使用视频分类字样");
+            Check(fixture.Requests-first<=2,"同目录文件名不同且类型为Movie时只执行一次分类搜索");
+            first=fixture.Requests;await catalog.ClassifyLibrary(directoryMovies,settings.MediaFolder,false,null,CancellationToken.None);Check(fixture.Requests==first,"目录分类结果缓存后不再逐个视频查询");
+            string orderRoot=Path.Combine(settings.MediaFolder,"自然排序");Directory.CreateDirectory(orderRoot);
+            var ordered=new[]{new Dictionary<string,object>{{"Id","order10"},{"Path",Path.Combine(orderRoot,"10.mkv")},{"SeriesName","爱情公寓1"},{"Type","Movie"}},new Dictionary<string,object>{{"Id","order2"},{"Path",Path.Combine(orderRoot,"2.mkv")},{"SeriesName","海岛旅程"},{"Type","Episode"}}};
+            foreach(var item in ordered)File.WriteAllText(Json.Text(item,"Path"),"fixture");
+            var naturalProgress=new List<LibraryLoadProgress>();await catalog.ClassifyLibrary(ordered,orderRoot,false,naturalProgress.Add,CancellationToken.None);
+            Check(ordered.All(x=>MediaPresentation.Category(x)=="动漫")&&naturalProgress.First().Message.Contains("海岛旅程"),"目录代表视频按文件名自然顺序选择2而非10，不受服务器返回顺序和元数据类型影响");
+            var inheritedTv=Videos(settings.MediaFolder,"爱情公寓 第二目录",2);inheritedTv[0]["SeriesName"]="爱情公寓1";inheritedTv[1]["Type"]="Movie";inheritedTv[1]["SeriesName"]="";
+            await catalog.ClassifyLibrary(inheritedTv,Path.GetDirectoryName(Json.Text(inheritedTv[0],"Path")),false,null,CancellationToken.None);
+            Check(inheritedTv.All(x=>MediaPresentation.Category(x)=="电视剧")&&Json.Text(inheritedTv[1],"Type")=="Movie","非动漫分类也由首个视频继承，底层媒体类型保持原样");
             Check(items.All(x=>File.ReadAllText(Json.Text(x,"Path"))==before[Json.Text(x,"Path")]),"分类扫描不修改媒体文件内容");
             Check(items.All(x=>Directory.GetFiles(Path.GetDirectoryName(Json.Text(x,"Path"))).All(f=>f.EndsWith(".mkv")||f.EndsWith(".mp4"))),"分类扫描不在媒体目录写入配置或说明文件");
         }

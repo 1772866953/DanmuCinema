@@ -41,7 +41,7 @@ namespace DanmuCinema
         {
             try
             {
-                if (!ready() || String.IsNullOrEmpty(api.Token) || String.IsNullOrEmpty(settings.UserId)) return;
+                if (!settings.AutoMatchDanmu || !ready() || String.IsNullOrEmpty(api.Token) || String.IsNullOrEmpty(settings.UserId)) return;
                 var sessions = Json.Read<object[]>(await api.Request("GET", "Sessions", null, true, cancellation).ConfigureAwait(false));
                 var activeIds = new HashSet<string>(sessions.OfType<Dictionary<string, object>>().Select(x => Json.Text(Json.Child(x, "NowPlayingItem"), "Id")), StringComparer.OrdinalIgnoreCase);
                 lock (sync)
@@ -93,7 +93,7 @@ namespace DanmuCinema
         }
         public async Task<bool> PrepareForPlayback(string id, string sourceId, CancellationToken cancellation)
         {
-            if (!Regex.IsMatch(id ?? "", "^[a-zA-Z0-9]{1,64}$")) return false;
+            if (!settings.AutoMatchDanmu || !Regex.IsMatch(id ?? "", "^[a-zA-Z0-9]{1,64}$")) return false;
             Task<bool> job;
             lock (sync)
             {
@@ -123,6 +123,7 @@ namespace DanmuCinema
             string xml = Path.ChangeExtension(video, ".xml");
             // Preserve explicit selections and existing sidecar files. Manual replacement remains available.
             if (File.Exists(xml) && new FileInfo(xml).Length > 0) { Report(item, "已就绪", "保留已有 XML", origin); return false; }
+            if (!settings.AutoMatchDanmu && origin != "提前准备") return false;
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
             {
                 timeout.CancelAfter(TimeSpan.FromMinutes(2));
@@ -133,6 +134,7 @@ namespace DanmuCinema
                 string content = await catalog.Download(episode, timeout.Token).ConfigureAwait(false);
                 if (DanmuCatalog.ParseXml(content).GetElementsByTagName("d").Count == 0) { Report(item, "暂无弹幕", "此集暂无可用弹幕", origin); return false; }
                 timeout.Token.ThrowIfCancellationRequested();
+                if (!settings.AutoMatchDanmu && origin != "提前准备") return false;
                 if (!SettingsStore.WriteMissingSidecar(xml, content)) return false;
                 catalog.RecordAssociation(item, episode);
                 Report(item, "已就绪", catalog.EpisodeSource(episode), origin);

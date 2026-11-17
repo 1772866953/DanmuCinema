@@ -1,0 +1,35 @@
+/* TingYe Android 0.5.0: record -> magnify -> refract -> neutral veil -> rim.
+ * Material and native text share one logical source before the body strains. */
+.bottom-navigation{position:relative;z-index:8;padding:16px 56px 20px;min-width:0;-webkit-app-region:no-drag}
+.dock-hit-surface{position:relative;width:100%;max-width:1180px;height:60px;margin:0 auto;touch-action:pan-y;user-select:none;outline:none;--dock-ink:var(--text,#243d3b);--dock-accent:var(--accent,#267b70);--dock-edge-ink:var(--text,#243d3b);--dock-fallback:#a8bbb1}
+.dock-body{position:absolute;inset:0;transform-origin:50% 50%;pointer-events:none;color:var(--dock-ink)}
+.dock-material{position:absolute;inset:0;border-radius:999px;overflow:hidden}
+.dock-tint{background:linear-gradient(to bottom,rgb(255 255 255 / .12),transparent 50%,rgb(0 0 0 / .035)),rgb(255 255 255 / .045)}
+.dock-tint{position:absolute;inset:0;border-radius:inherit}
+.dock-optic-sample,.dock-source-sample{position:absolute;inset:-12px;pointer-events:none;overflow:hidden;background:var(--dock-fallback)}
+.dock-optic-environment{position:absolute;left:0;top:0;transform-origin:0 0;background:#a8bbb1 url('/optical-backdrop.svg') center/cover no-repeat}
+.dock-recording{position:absolute;left:0;top:0;transform-origin:0 0;overflow:visible}
+.dock-source-clip{position:absolute;inset:0;overflow:hidden;contain:paint;clip-path:inset(0)}
+.dock-source-rail{position:absolute;left:0;top:0;border-radius:999px;overflow:hidden}
+.dock-source-base-sample{position:absolute;inset:-12px;overflow:hidden;background:var(--dock-fallback)}
+.dock-background-image{position:absolute;inset:0;width:100%;height:100%;object-fit:fill;display:none}
+.dock-cached-background{display:none}.dock-cached-background>.dock-background-image{display:block}
+.dock-source-selection,.dock-resting-selection{position:absolute;border-radius:999px;background:var(--dock-ink);pointer-events:none;transform-origin:center}
+.dock-prism-edge{position:absolute;inset:0;border-radius:inherit;pointer-events:none;mask-size:100% 100%;mask-repeat:no-repeat}
+.dock-labels{position:absolute;inset:0;display:grid;grid-template-columns:repeat(var(--dock-count,9),minmax(0,1fr));align-items:stretch;padding:4px;pointer-events:none;filter:none;backdrop-filter:none;font-family:'DanmuCinema UI','Microsoft YaHei UI',sans-serif;-webkit-font-smoothing:antialiased}
+.dock-label{display:flex;align-items:center;justify-content:center;gap:5px;min-width:0;font-size:12px;line-height:1.4;font-weight:600;white-space:nowrap;color:var(--dock-ink)}
+.dock-label>svg{flex:0 0 auto}.dock-label>span{min-width:0}.dock-label[data-active=true]{color:var(--dock-accent)}
+.dock-lens{position:absolute;transform-origin:center;pointer-events:none;border-radius:999px;--dock-lift:0}
+.dock-lens-glass{position:absolute;inset:0;border-radius:inherit;overflow:hidden;box-shadow:0 calc(3px * var(--dock-lift)) calc(8px * var(--dock-lift)) rgb(0 0 0 / calc(.12 * var(--dock-lift)))}
+.dock-lens-clip{position:absolute;inset:0;border-radius:inherit;overflow:hidden;filter:none;backdrop-filter:none}
+.dock-native-source{filter:none;backdrop-filter:none}
+.dock-lens-veil{position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:linear-gradient(to bottom,rgb(255 255 255 / calc(.15 * var(--dock-optics,0))),transparent 50%,rgb(0 0 0 / calc(.035 * var(--dock-optics,0)))),rgb(255 255 255 / calc(.055 * var(--dock-optics,0)))}
+.dock-raised-rim,.dock-rail-rim,.dock-source-outline{position:absolute;inset:0;pointer-events:none;shape-rendering:geometricPrecision}
+.dock-raised-rim{opacity:0}
+.dock-targets{position:absolute;inset:0;display:grid;grid-template-columns:repeat(var(--dock-count,9),minmax(0,1fr));padding:4px}
+.dock-targets>button{position:relative;min-width:0;border:0!important;border-radius:999px;background:transparent!important;padding:0;touch-action:pan-y}
+.dock-targets>button:focus-visible{outline:none}
+.dock-hit-surface[data-input=keyboard] .dock-targets>button:focus-visible{outline:2px solid #59899b;outline-offset:3px}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+@media(max-width:1100px){.dock-hit-surface{height:66px}.dock-label{flex-direction:column;gap:4px;font-size:11px}.dock-label>svg{width:17px;height:17px}}
+@media(forced-colors:active){.dock-material{background:Canvas;border:1px solid CanvasText}.dock-label{color:CanvasText}.dock-label[data-active=true]{color:HighlightText}.dock-optic-environment,.dock-prism-edge,.dock-raised-rim{display:none}.dock-source-sample,.dock-source-rail{background:Canvas}.dock-source-selection{background:Highlight}}
