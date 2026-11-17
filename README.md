@@ -10,7 +10,6 @@ Windows 局域网媒体服务与弹幕管理工具。电脑保存视频，播放
 
 ![整季弹幕匹配](docs/screenshots/03-season-matching.png)
 
-*界面截图使用虚构媒体与演示数据。*
 
 ## 功能
 
